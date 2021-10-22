@@ -27,6 +27,7 @@ from selfdrive.controls.lib.vehicle_model import VehicleModel
 from selfdrive.locationd.calibrationd import Calibration
 from selfdrive.hardware import HARDWARE, TICI, EON
 from selfdrive.manager.process_config import managed_processes
+from common.op_params import opParams
 
 LDW_MIN_SPEED = 31 * CV.MPH_TO_MS
 LANE_DEPARTURE_THRESHOLD = 0.1
@@ -53,6 +54,7 @@ EventName = car.CarEvent.EventName
 class Controls:
   def __init__(self, sm=None, pm=None, can_sock=None):
     config_realtime_process(4 if TICI else 3, Priority.CTRL_HIGH)
+    self.op_params = opParams()
 
     self.accel_pressed = False
     self.decel_pressed = False
@@ -547,7 +549,8 @@ class Controls:
                                                                              lat_plan.psis,
                                                                              lat_plan.curvatures,
                                                                              lat_plan.curvatureRates,
-                                                                             t_since_plan)
+                                                                             t_since_plan,
+                                                                             opParams().get("LAT_DELAY"))
       actuators.steer, actuators.steeringAngleDeg, lac_log = self.LaC.update(self.active, CS, self.CP, self.VM, params, 
                                                                              desired_curvature, desired_curvature_rate)
     else:
