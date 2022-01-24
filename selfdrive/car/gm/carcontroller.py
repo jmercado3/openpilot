@@ -143,14 +143,43 @@ class CarController():
       
       if (CS.one_pedal_mode_active or CS.coast_one_pedal_mode_active):
         apply_gas = apply_gas * lead_long_gas_lockout_factor + float(P.MAX_ACC_REGEN) * (1. - lead_long_gas_lockout_factor)
+        time_since_brake = t - CS.one_pedal_mode_last_gas_press_t
         if CS.one_pedal_mode_active:
-          one_pedal_apply_brake = interp(CS.vEgo, CS.one_pedal_mode_stop_apply_brake_bp[CS.one_pedal_brake_mode], CS.one_pedal_mode_stop_apply_brake_v[CS.one_pedal_brake_mode])
-          one_pedal_apply_brake *= interp(CS.pitch, CS.one_pedal_pitch_brake_adjust_bp, CS.one_pedal_pitch_brake_adjust_v)
+          if abs(CS.angle_steers) > CS.one_pedal_angle_steers_cutoff_bp[0]:
+            one_pedal_apply_brake = interp(CS.vEgo, CS.one_pedal_mode_stop_apply_brake_bp[CS.one_pedal_brake_mode], CS.one_pedal_mode_stop_apply_brake_v[CS.one_pedal_brake_mode])
+            one_pedal_apply_brake_minus1 = interp(CS.vEgo, CS.one_pedal_mode_stop_apply_brake_bp[max(0,CS.one_pedal_brake_mode-1)], CS.one_pedal_mode_stop_apply_brake_v[max(0,CS.one_pedal_brake_mode-1)])
+            one_pedal_apply_brake = interp(abs(CS.angle_steers), CS.one_pedal_angle_steers_cutoff_bp, [one_pedal_apply_brake, one_pedal_apply_brake_minus1])
+          else:
+            one_pedal_apply_brake = interp(CS.vEgo, CS.one_pedal_mode_stop_apply_brake_bp[CS.one_pedal_brake_mode], CS.one_pedal_mode_stop_apply_brake_v[CS.one_pedal_brake_mode])
+          one_pedal_apply_brake *= interp(CS.pitch, CS.one_pedal_pitch_brake_adjust_bp, CS.one_pedal_pitch_brake_adjust_v[CS.one_pedal_brake_mode])
           one_pedal_apply_brake = min(one_pedal_apply_brake, float(P.BRAKE_LOOKUP_V[0]))
-          time_since_brake = t - CS.one_pedal_mode_last_gas_press_t
           one_pedal_apply_brake *= interp(time_since_brake, CS.one_pedal_mode_ramp_time_bp, CS.one_pedal_mode_ramp_time_v) if CS.one_pedal_brake_mode < 2 else 1.
         else:
           one_pedal_apply_brake = 0.
+          
+        
+        # ramp braking
+        if CS.one_pedal_mode_active_last and time_since_brake > CS.one_pedal_mode_ramp_time_bp[-1]:
+          if CS.one_pedal_mode_apply_brake != one_pedal_apply_brake:
+            if CS.one_pedal_mode_ramp_mode_last != CS.one_pedal_brake_mode:
+              # brake mode changed, so need to calculate new step based on the old and new modes
+              old_apply_brake = interp(CS.vEgo, CS.one_pedal_mode_stop_apply_brake_bp[CS.one_pedal_mode_ramp_mode_last], CS.one_pedal_mode_stop_apply_brake_v[CS.one_pedal_mode_ramp_mode_last])
+              CS.one_pedal_mode_ramp_time_step = (one_pedal_apply_brake - old_apply_brake) / CS.one_pedal_mode_ramp_duration
+            if CS.one_pedal_mode_apply_brake < one_pedal_apply_brake:
+              if CS.one_pedal_mode_ramp_time_step < 0.:
+                CS.one_pedal_mode_ramp_time_step *= -1.
+              CS.one_pedal_mode_apply_brake = max(one_pedal_apply_brake, CS.one_pedal_mode_apply_brake + CS.one_pedal_mode_ramp_time_step * (t - CS.one_pedal_mode_ramp_t_last))
+            else:
+              if CS.one_pedal_mode_ramp_time_step > 0.:
+                CS.one_pedal_mode_ramp_time_step *= -1.
+              CS.one_pedal_mode_apply_brake = min(one_pedal_apply_brake, CS.one_pedal_mode_apply_brake + CS.one_pedal_mode_ramp_time_step * (t - CS.one_pedal_mode_ramp_t_last))
+            one_pedal_apply_brake = CS.one_pedal_mode_apply_brake
+        else:
+          CS.one_pedal_mode_apply_brake = one_pedal_apply_brake
+          CS.one_pedal_mode_active_last = True
+        CS.one_pedal_mode_ramp_t_last = t
+        CS.one_pedal_mode_ramp_mode_last = CS.one_pedal_brake_mode
+        
         if CS.one_pedal_mode_op_braking_allowed and CS.coasting_long_plan not in ['cruise', 'limit']:
           apply_brake = max(one_pedal_apply_brake, apply_brake * lead_long_brake_lockout_factor)
         else:
@@ -158,21 +187,30 @@ class CarController():
         
       elif CS.coasting_enabled and lead_long_brake_lockout_factor < 1.:
         if CS.coasting_long_plan in ['cruise', 'limit'] and apply_gas < P.ZERO_GAS or apply_brake > 0.:
+          check_speed_ms = (CS.speed_limit if CS.speed_limit_active and CS.speed_limit < CS.v_cruise_kph else CS.v_cruise_kph) * CV.KPH_TO_MS
           if apply_brake > 0.:
-            over_speed_factor = interp(CS.vEgo / (CS.v_cruise_kph * CV.KPH_TO_MS), CS.coasting_over_speed_vEgo_BP, [0., 1.]) if (CS.v_cruise_kph > 0 and CS.coasting_brake_over_speed_enabled) else 0.
+            coasting_over_speed_vEgo_BP = [
+              interp(CS.vEgo, CS.coasting_over_speed_vEgo_BP_BP, CS.coasting_over_speed_vEgo_BP[0]),
+              interp(CS.vEgo, CS.coasting_over_speed_vEgo_BP_BP, CS.coasting_over_speed_vEgo_BP[1])
+            ]
+            over_speed_factor = interp(CS.vEgo / check_speed_ms, coasting_over_speed_vEgo_BP, [0., 1.]) if (check_speed_ms > 0. and CS.coasting_brake_over_speed_enabled) else 0.
             over_speed_brake = apply_brake * over_speed_factor
             apply_brake = max([apply_brake * lead_long_brake_lockout_factor, over_speed_brake])
           if apply_gas < P.ZERO_GAS and lead_long_gas_lockout_factor < 1.:
-            over_speed_factor = interp(CS.vEgo / (CS.v_cruise_kph * CV.KPH_TO_MS), CS.coasting_over_speed_regen_vEgo_BP, [0., 1.]) if (CS.v_cruise_kph > 0 and CS.coasting_brake_over_speed_enabled) else 0.
+            coasting_over_speed_vEgo_BP = [
+              interp(CS.vEgo, CS.coasting_over_speed_vEgo_BP_BP, CS.coasting_over_speed_regen_vEgo_BP[0]),
+              interp(CS.vEgo, CS.coasting_over_speed_vEgo_BP_BP, CS.coasting_over_speed_regen_vEgo_BP[1])
+            ]
+            over_speed_factor = interp(CS.vEgo / check_speed_ms, coasting_over_speed_vEgo_BP, [0., 1.]) if (check_speed_ms > 0 and CS.coasting_brake_over_speed_enabled) else 0.
             coast_apply_gas = int(round(float(P.ZERO_GAS) - over_speed_factor * (P.ZERO_GAS - apply_gas)))
             apply_gas = apply_gas * lead_long_gas_lockout_factor + coast_apply_gas * (1. - lead_long_gas_lockout_factor)
-          
       elif CS.no_friction_braking and lead_long_brake_lockout_factor < 1.:
         if CS.coasting_long_plan in ['cruise', 'limit'] and apply_brake > 0.:
           apply_brake *= lead_long_brake_lockout_factor
       apply_gas = int(round(apply_gas))
       apply_brake = int(round(apply_brake))
-      
+
+      CS.one_pedal_mode_active_last = CS.one_pedal_mode_active
 
       if do_log:
         f.write(",".join([str(i) for i in [

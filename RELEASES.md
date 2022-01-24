@@ -1,3 +1,22 @@
+Version tw-0.8.9-3.8 (2022-01-24)
+========================
+ * FIXED: Now works with rev2 (shipped "with" 0.8.11) Comma Three units (sensor error resolved)
+ * UNIMPROVED: Revert to "stock" behavior for disengaging move-fast speed limit control using cruise +/- buttons
+ * IMPROVED: Reset speed while OP engaged using "set" button if 10+ mph over current set speed
+ * IMPROVED: Retuned eco acceleration profile
+ * IMPROVED: [Volt] reintroduce integral gain to lateral controller; better centering under constant force (e.g. slanted road or prevailing crosswind) and significantly better following of planned path on unmarked/covered roads
+ * IMPROVED: Silky smooth transitions when switching between one-pedal brake modes
+
+Version tw-0.8.9-3.7 (2021-12-27)
+========================
+ * NEW: 0.8.12 new OP sounds as default sound set
+ * NEW: Alternate sounds now includes alternate sound for repeat warning (a.k.a. RSOD sound)
+ * IMPROVED: Draw acceleration mode and laneless mode buttons even if there's an alert, since you can change them while alerts are shown
+ * IMPROVED: Custom sounds and silencing engage/disengage take immediate effect
+ * IMPROVED: Suppress move-fast map-based speed limit notifications when pressing/depressing gas in one-pedal mode
+ * IMPROVED: Over-speed coasting properly uses move-fast speed limit
+ * IMPROVED: 0.8.12 comma3 volume limits
+
 Version tw-0.8.9-3.6 (2021-12-16)
 ========================
  * NEW: 0.8.12 new driving model (with higher max speed and fully integrated C3 training data!) and AGNOS 3
