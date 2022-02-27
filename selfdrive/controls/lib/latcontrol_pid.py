@@ -12,6 +12,7 @@ class LatControlPID(LatControl):
     self.pid = PIDController((CP.lateralTuning.pid.kpBP, CP.lateralTuning.pid.kpV),
                              (CP.lateralTuning.pid.kiBP, CP.lateralTuning.pid.kiV),
                              (CP.lateralTuning.pid.kdBP, CP.lateralTuning.pid.kdV),
+                             k_11 = 0.5, k_12 = 0.5, k_13 = 0.5, min_norm_denom = 0.3,
                              k_f=CP.lateralTuning.pid.kf, pos_limit=1.0, neg_limit=-1.0,
                              sat_limit=CP.steerLimitTimer, derivative_period=0.1)
     self.get_steer_feedforward = CI.get_steer_feedforward_function()

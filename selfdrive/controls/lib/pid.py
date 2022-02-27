@@ -14,7 +14,7 @@ def apply_deadzone(error, deadzone):
   return error
 
 class PIDController:
-  def __init__(self, k_p=0., k_i=0., k_d=0., k_f=1., pos_limit=None, neg_limit=None, rate=100, sat_limit=0.8, derivative_period=1.):
+  def __init__(self, k_p=0., k_i=0., k_d=0., k_f=1., k_11=0., k_12=0., k_13=0., min_norm_denom = 0.01, pos_limit=None, neg_limit=None, rate=100, sat_limit=0.8, derivative_period=1.):
     self._k_p = k_p  # proportional gain
     self._k_i = k_i  # integral gain
     self._k_d = k_d  # derivative gain
@@ -25,6 +25,18 @@ class PIDController:
       self._k_i = [[0], [self._k_i]]
     if isinstance(self._k_d, Number):
       self._k_d = [[0], [self._k_d]]
+
+    self._k_11 = k_11  # proportional gain
+    self._k_12 = k_12  # integral gain
+    self._k_13 = k_13  # derivative gain
+    if isinstance(self._k_11, Number):
+      self._k_11 = [[0], [self._k_11]]
+    if isinstance(self._k_12, Number):
+      self._k_12 = [[0], [self._k_12]]
+    if isinstance(self._k_13, Number):
+      self._k_13 = [[0], [self._k_13]]
+    self.do_auto_tune = any(v > 0. for kv in [self._k_11, self._k_12, self._k_13] for v in kv[-1])
+    self.min_norm_denom = min_norm_denom
 
     self.pos_limit = pos_limit
     self.neg_limit = neg_limit
@@ -49,6 +61,18 @@ class PIDController:
   @property
   def k_d(self):
     return interp(self.speed, self._k_d[0], self._k_d[1])
+  
+  @property
+  def k_11(self):
+    return interp(self.speed, self._k_11[0], self._k_11[1])
+
+  @property
+  def k_12(self):
+    return interp(self.speed, self._k_12[0], self._k_12[1])
+
+  @property
+  def k_13(self):
+    return interp(self.speed, self._k_13[0], self._k_13[1])
 
   def _check_saturation(self, control, check_saturation, error):
     saturated = (control < self.neg_limit) or (control > self.pos_limit)
@@ -70,23 +94,43 @@ class PIDController:
     self.saturated = False
     self.control = 0
     self.errors = []
+    self.error_norms = []
 
   def update(self, setpoint, measurement, speed=0.0, check_saturation=True, override=False, feedforward=0., deadzone=0., freeze_integrator=False):
     self.speed = speed
 
     error = float(apply_deadzone(setpoint - measurement, deadzone))
-    self.p = error * self.k_p
-    self.f = feedforward * self.k_f
+    
+    if self.do_auto_tune:
+      abs_sp = setpoint > 0. setpoint else -setpoint
+      self.error_norms.append(float(error) / max(abs_sp, self.min_norm_denom))
+      while len(self.error_norms) > self._d_period:
+        self.error_norms.pop(0)
 
-    d = 0
+    kp = self.k_p
+    ki = self.k_i
+    kd = self.k_d
     if len(self.errors) >= self._d_period:  # makes sure we have enough history for period
+      if self.do_auto_tune:
+        delta_error_norm = self.error_norms[-1] - self.error_norms[-self._d_period]
+        gain_update_factor = self.error_norms[-1] * delta_error_norm
+        if gain_update_factor != 0.:
+          abs_guf = abs(gain_update_factor)
+          kp *= 1. + min(2., self.k_11 * abs_guf)
+          ki *= 1. + clip(self.k_12 * gain_update_factor, -1., 2.)
+          kd *= 1. + min(2., self.k_13 * abs_guf)
       d = (error - self.errors[-self._d_period]) * self._d_period_recip  # get deriv in terms of 100hz (tune scale doesn't change)
-      d *= self.k_d
+      d *= kd
+    else:
+      d = 0.
+    
+    self.p = error * kp
+    self.f = feedforward * self.k_f
 
     if override:
       self.i -= self.i_unwind_rate * float(np.sign(self.i))
     else:
-      i = self.i + error * self.k_i * self.i_rate
+      i = self.i + error * ki * self.i_rate
       control = self.p + self.f + i + d
 
       # Update when changing i will move the control away from the limits
