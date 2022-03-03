@@ -148,16 +148,15 @@ class CarInterface(CarInterfaceBase):
       ret.wheelbase = 2.86
       ret.steerRatio = 16.0 #14.4  # end to end is 13.46
       ret.steerRatioRear = 0.
+      ret.steerActuatorDelay = 0.7
       ret.centerToFront = ret.wheelbase * 0.4
       ret.lateralTuning.pid.kpBP = [i * CV.MPH_TO_MS for i in [0., 80.]]
       ret.lateralTuning.pid.kpV = [0.18, 0.26]
-      ret.lateralTuning.pid.kiBP = [i * CV.MPH_TO_MS for i in [0., 80.]]
-      ret.lateralTuning.pid.kiV = [0.01, .02]
-      ret.lateralTuning.pid.kdBP = [i * CV.MPH_TO_MS for i in [15., 35., 80.]]
-      ret.lateralTuning.pid.kdV = [0.05, 0.15, 0.2]
+      ret.lateralTuning.pid.kiBP = [0.0]
+      ret.lateralTuning.pid.kiV = [0.02]
+      ret.lateralTuning.pid.kdBP = [i * CV.MPH_TO_MS for i in [15., 40.]]
+      ret.lateralTuning.pid.kdV = [0.2, 0.3]
       ret.lateralTuning.pid.kf = 1. # get_steer_feedforward_acadia()
-      ret.steerMaxBP = [i * CV.MPH_TO_MS for i in [0., 37., 80.]]
-      ret.steerMaxV = [1., 1.05, 1.4]
       ret.longitudinalTuning.kdV = [0.8, 0.2]
       ret.longitudinalTuning.kdBP = [5., 25.]
 
