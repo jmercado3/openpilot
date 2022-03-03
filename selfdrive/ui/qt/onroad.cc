@@ -360,6 +360,9 @@ void NvgWindow::paintGL() {
     QPainter painter(this);
     painter.setRenderHint(QPainter::Antialiasing);
     painter.setPen(Qt::NoPen);
+    painter.save();
+    painter.translate(this->width()/2, this->height()/2);
+    painter.rotate(180.);
 
     drawLaneLines(painter, s->scene);
 
@@ -372,6 +375,7 @@ void NvgWindow::paintGL() {
         drawLead(painter, leads[1], s->scene.lead_vertices[1]);
       }
     }
+    painter.restore();
   }
 
   double cur_draw_t = millis_since_boot();
