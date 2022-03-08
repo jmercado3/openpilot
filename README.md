@@ -122,12 +122,12 @@
 - [x] [Volt] [✅] One-pedal D/L engage on gas: tie the engage on gas setting to the D/L gear shifter position. Off in D; on in L. (suggested by Shadowlight5)
 - [x] [GM] panda-based GM steering fault fix (thanks jshuler)
 - [x] Remember last follow mode (ported from kegman)
+- [x] Grey/White panda support
 
 #### Planned Fork Features (in no particular order):
 -----
 
 - [ ] Stop-and-go for 2018 Volt
-- [ ] Grey panda support
 - [ ] Chevy Bolt support
 - [ ] Record screen button
 - [ ] Auto engage parking brake
