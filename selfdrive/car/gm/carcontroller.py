@@ -142,7 +142,10 @@ class CarController():
           CS.no_friction_braking]]) + ",")
       
       if (CS.one_pedal_mode_active or CS.coast_one_pedal_mode_active):
-        apply_gas = apply_gas * lead_long_gas_lockout_factor + float(P.MAX_ACC_REGEN) * (1. - lead_long_gas_lockout_factor)
+        if not CS.one_pedal_mode_active and CS.gear_shifter_ev == 4 and CS.one_pedal_dl_coasting_enabled and CS.vEgo > 0.05:
+          apply_gas = apply_gas * lead_long_gas_lockout_factor + float(P.ZERO_GAS ) * (1. - lead_long_gas_lockout_factor)
+        else:
+          apply_gas = apply_gas * lead_long_gas_lockout_factor + float(P.MAX_ACC_REGEN) * (1. - lead_long_gas_lockout_factor)
         time_since_brake = t - CS.one_pedal_mode_last_gas_press_t
         if CS.one_pedal_mode_active:
           if abs(CS.angle_steers) > CS.one_pedal_angle_steers_cutoff_bp[0]:
@@ -164,7 +167,7 @@ class CarController():
             if CS.one_pedal_mode_ramp_mode_last != CS.one_pedal_brake_mode:
               # brake mode changed, so need to calculate new step based on the old and new modes
               old_apply_brake = interp(CS.vEgo, CS.one_pedal_mode_stop_apply_brake_bp[CS.one_pedal_mode_ramp_mode_last], CS.one_pedal_mode_stop_apply_brake_v[CS.one_pedal_mode_ramp_mode_last])
-              CS.one_pedal_mode_ramp_time_step = (one_pedal_apply_brake - old_apply_brake) / CS.one_pedal_mode_ramp_duration
+              CS.one_pedal_mode_ramp_time_step = (one_pedal_apply_brake - old_apply_brake) / (CS.one_pedal_mode_ramp_duration * (2. if CS.one_pedal_mode_apply_brake > one_pedal_apply_brake else 1.))
             if CS.one_pedal_mode_apply_brake < one_pedal_apply_brake:
               if CS.one_pedal_mode_ramp_time_step < 0.:
                 CS.one_pedal_mode_ramp_time_step *= -1.
@@ -219,13 +222,30 @@ class CarController():
         f.close()
     
     if CS.showBrakeIndicator:
-      CS.apply_brake_percent = int(interp(apply_brake, [float(P.BRAKE_LOOKUP_V[-1]), float(P.BRAKE_LOOKUP_V[0])], [0., 100.])) if CS.vEgo > 0.1 else 0
+      CS.apply_brake_percent = 0.
+      if CS.vEgo > 0.1:
+        if CS.out.cruiseState.enabled:
+          if not CS.pause_long_on_gas_press:
+            if apply_brake > 1:
+              CS.apply_brake_percent = interp(apply_brake, [float(P.BRAKE_LOOKUP_V[-1]), float(P.BRAKE_LOOKUP_V[0])], [51., 100.])
+            elif (CS.one_pedal_mode_active or CS.coast_one_pedal_mode_active):
+              CS.apply_brake_percent = interp(CS.hvb_wattage, CS.hvb_wattage_bp, [0., 50.])
+            elif apply_gas < P.ZERO_GAS:
+              CS.apply_brake_percent = interp(apply_gas, [float(P.GAS_LOOKUP_V[0]), float(P.GAS_LOOKUP_V[1])], [51., 0.])
+          else:
+            CS.apply_brake_percent = interp(CS.hvb_wattage, CS.hvb_wattage_bp, [0., 50.])
+        elif CS.is_ev and CS.out.brake == 0.:
+          CS.apply_brake_percent = interp(CS.hvb_wattage, CS.hvb_wattage_bp, [0., 50.])
+        elif CS.out.brake > 0.:
+          CS.apply_brake_percent = interp(CS.out.brake, [0., 0.5], [51., 100.])
+      elif CS.out.brake > 0.:
+        CS.apply_brake_percent = interp(CS.out.brake, [0., 0.5], [51., 100.])
     
     # Gas/regen and brakes - all at 25Hz
     if (frame % 4) == 0:
       idx = (frame // 4) % 4
 
-      if CS.cruiseMain and not enabled and CS.autoHold and CS.autoHoldActive and not CS.out.gasPressed and CS.out.gearShifter == 'drive' and CS.out.vEgo < 0.01 and not CS.regenPaddlePressed:
+      if CS.cruiseMain and not enabled and CS.autoHold and CS.autoHoldActive and not CS.out.gasPressed and CS.out.gearShifter in ['drive','low'] and CS.out.vEgo < 0.02 and not CS.regenPaddlePressed:
         # Auto Hold State
         car_stopping = apply_gas < P.ZERO_GAS
         standstill = CS.pcm_acc_status == AccState.STANDSTILL

@@ -55,6 +55,7 @@
 - [x] [Chevy Volt] Sigmoidal steering response (thanks qadmus)
 - [x] [GM] [✅] AutoHold (autohold brakes when stopped; ported from kegman)
 - [x] [GM] Adjustable follow "mode" using ACC distance button (ported from kegman, but smoother follow profiles)
+- [x] [GM] [✅] Dynamic follow mode
 - [x] [GM] Toggle steering with LKAS button (wheel color changes to indicate disengagement)
 - [x] [GM] One-pedal driving a.k.a. autosteering only a.k.a. toggle longitudinal control: using regen (volt) and/or light/moderate/heavy braking, control OP all the way to a stop, without a lead, and without disengaging, with just the gas pedal (see below) (application of friction brakes originally suggested by cybertronicify — 10/06/2021)
 - [x] [✅] [Dynamic Lane Profile](https://github.com/sunnyhaibin/openpilot#dynamic-lane-profile-dlp) (DLP); *tap button while driving to switch between auto/laneless/lane-only. must enable "Disable use of lanelines" for button to appear* (ported from sunnyhaibin)
@@ -69,26 +70,31 @@
 - [x] [✅] 3mph cruise speed offset: speed will be 23/28/33/38/etc.
 - [x] [✅] Alternate sound effect set (inspired by sunnyhaibin implementation of mute sounds)
 - [x] [✅] Mute engage and disengage sounds (inspired by sunnyhaibin implementation)
+- [x] Brightness control: Tap driver monitoring icon to cycle stock/medium/low brightness (most recently suggested by veryluckyguy)
+    * Screen will temporarily undim for warning/critical alerts
 - [x] [✅] Disable onroad uploads: for use with data-limited wifi hotspots. Reduces data use from 400MB/hour or 22MB/mile (based on 30 minute low-speed trip) down to 25MB/hour or 0.4MB/mile (based on 5 hour trip at 84mph; i.e. not a perfect comparison to the other trip)
     * Don't bother if you subscribe to [comma Prime](https://comma.ai/prime), which has unlimited data, and a host of other benefits! Don't delay; subscribe today!!
     * iPhone users can use [this shortcut](https://www.icloud.com/shortcuts/7f3c7e98f95d4f85a9bad939aa069fcd) to instantly open the personal hotspot page in the Settings app in order to enable personal hotspot for your comma device to connect.
       * Combined with an Automation to run the shortcut when you enter CarPlay, or when you connect to your car's Bluetooth, this can be a pretty convenience setup.
     * Android users could try the [Hot Spot Starter](https://play.google.com/store/apps/details?id=de.thjunge11.autohotspot) app, but I can't recommend it as I haven't tried it, so maybe [look for something else if it doesn't work](https://forum.xda-developers.com/t/enable-hotspot-automatically-when-i-enter-the-car.3915107/)
 - [x] [✅] Coasting: OP will still brake behind a lead car and to slow down for curves, but will not apply engine/regen/friction brakes in order to keep the set speed (by user or map speed limit)
-    * Toggle coasting while driving by tapping the max speed indicator
+    * Toggle coasting while driving 
+      * in Volt using gear shifter: D for coasting, L for regen (thanks to jshuler for discovering the CAN message of extra gear shifter values)
+      * in other cars by tapping the max speed indicator
     * A "+" after the max speed indicates that coasting is enabled
     * *Can be a bit rough on the brakes when following downhill over set speed; recommend to disable if uncomfortable when constantly following downhill*
     * (Inspired by the implementation in sunnyhaibin's fork)
 - [x] [✅] Brake when 15% over set speed when coasting enabled
+- [x] [Volt] [✅] Coasting D/L control: Tie the above option to the D/L gear shifter position. Coast in D; maintain set speed exactly in L.
 - [x] [✅] Nudgeless lane change: OP will start lane change automatically in direction of blinker after blinker on for 3s
-- [x] [✅] Friction braking indicator
+- [x] [✅] Braking indicator shows level of regenerative/engine and friction braking
 - [x] **Customizable, dynamic vehicle/device metrics** (adapted from kegman)
     * To use:
         * Tap the current speed on the openpilot display to cycle the number of metrics
         * Tap any metric to cycle its content (sorry for all the god-forsaken tapping, a better metric display with vehicle, following, position, and device widgets is a WIP)
     * Metrics (35 to choose from):
         * Device info: CPU temperature (°C and °F), CPU percent, CPU temp + percent (°C and °F), memory temperature (°C and °F), memory used, free storage, ambient temperature (°C and °F), fanspeed (as percent of max), GPS accuracy (and number of satelites), altitude
-        * Vehicle info: Engine RPM, engine coolant temperature (°C and °F), engine RPM + coolant temperature (°C and °F), steering torque, steering angle, desired steering angle, vehicle acceleration, vehicle jerk, percent grade of current road (one based on GPS, one based on device accelerometer)
+        * Vehicle info: Engine RPM, engine coolant temperature (°C and °F), engine RPM + coolant temperature (°C and °F), steering torque, steering angle, desired steering angle, vehicle acceleration, vehicle jerk, percent grade of current road (one based on GPS, one based on device accelerometer), Volt high-voltage battery wattage [kW], voltage [V], current [A], and voltage+wattage 
         * Lead-following info: follow distance level, lead distance [length], desired lead distance [length], lead distance [time], desired lead distance [time], follow distance and acceleration mpc costs [in units of the stock OP costs; i.e. 2.5 means 2.5× the stock OP value], relative lead velocity, absolute lead velocity
 - [x] [GM] [✅] **One-pedal driving**: OP will apply light to heavy braking when you let completely off the gas, allowing you to come to a full stop and resume without OP disengaging
     * **Not necessary to enable the one-pedal toggle; you engage/disengage while driving**
@@ -97,20 +103,23 @@
       2. If one-pedal engage on gas toggle is enabled, press gas while cruise is set and traveling above 1mph
       3. While cruise is set, lower cruise speed to 1
     * When in one-pedal mode, the max speed indicator in openpilot will be replaced with a one-pedal mode indicator. Tap the one-pedal icon to toggle one-pedal engage on gas mode
-    * Vehicle follow distance indicator and pedal icon color indicate the one-pedal braking profile in use; 1 bar/2 bar/3 bar = 🟢/🟠/🔴 = light/moderate/heavy braking
+    * Vehicle follow distance indicator and pedal icon color indicate the one-pedal braking profile in use; 1 bar/2 bar/3 bar = (⚫️)/🟢/🟠/🔴 = (regen-engine)/light/moderate/heavy braking
     * Control braking with follow distance button:
-      * *Single press*: alternate between persistent light or moderate braking
-      * *Press and hold*: apply temporary hard braking (indicated by follow level 3 on vehicle cluster and red one-pedal icon) (Chevy's the ones that decided a brake paddle on the steering wheel was a good idea; not me)
-      * *Press when friction braking disabled*: activate friction braking
-      * *Double-press when stopped or when gas is pressed and friction braking is active*: deactivate friction braking
+      * *Single press*: alternate between persistent light or moderate 🟢/🟠 braking
+      * *Press and hold*: apply temporary hard braking 🔴 (Chevy's the ones that decided a brake paddle on the steering wheel was a good idea; not me)
+      * *Press when friction braking disabled*: activate friction braking 🟢
+      * *Double-press when stopped or when gas is pressed and friction braking is active*: deactivate friction braking/activate regen/engine braking ⚫️
+    * [Volt] Coasting: using gear shifter, select D for coasting or L for regen (thanks to jshuler)
     * When one-pedal mode active and blinker is on below 20mph, autosteer will automatically pause
       * [Optional; tap wheel icon to toggle while in one-pedal mode]
       * A second white circle around the wheel icon indicates autosteer pause is enabled
     * *Must have disable disengage on gas toggle enabled*
 - [x] [GM] [✅] One-pedal pro braking: Completely disable cruise/speed limit/curve/follow braking when in one-pedal mode. You are soley responsible for slowing the car using the adjustable one-pedal braking (by pressing/holding the follow distance button) or with the physical brakes/regen paddle
+- [x] [Volt] [✅] One-pedal D/L coasting: In one-pedal regen/engine ⚫️ braking mode in D, no braking whatsoever will be applied. Shift to L for max regen. Happy hypermiling!
 - [x] [GM] [✅] One-pedal engage on gas: When cruising at speed and the driver presses the gas (i.e. not when resuming from a stop), engage one-pedal mode
     * Toggle while one-pedal mode enabled by tapping the pedal icon
     * Indiated by an extra circle around one-pedal icon
+- [x] [Volt] [✅] One-pedal D/L engage on gas: tie the engage on gas setting to the D/L gear shifter position. Off in D; on in L. (suggested by Shadowlight5)
 - [x] [GM] panda-based GM steering fault fix (thanks jshuler)
 - [x] Remember last follow mode (ported from kegman)
 
@@ -178,28 +187,6 @@ Then, `sudo reboot`
 
 This fork will auto-update while your device has internet access, and changes are automatically applied the next time the device restarts.
 If you're device stays connected to your car all the time, you'll be presented with a message to update when your car is off.
-
-### Tuning
-------
-
-* Remember to make small adjustments to 1 value at a time and then test.
-* Use [PlotJugger](https://github.com/commaai/openpilot/tree/master/tools/plotjuggler) to make sure you are going in the right direction.
-
-#### Lateral Tuning
-------
-**Note**: All of these parameters interact with each other so finding the balance is a bit experimental.
-
-* **Kp too high** - The vehicle overshoots and undershoots center.
-* **Kp too low** - The vehicle doesn't turn enough.
-
-* **Ki too high** - The vehicle gets to center without oscillations, but it takes too long to center. If you hit a bump or give the wheel a quick nudge, it should oscillate 3 - 5 times before coming to steady-state. If the wheel oscillates forever (critically damped), then your Kp or Ki or both are too high.
-* **Ki too low** - The vehicle oscillates trying to reach the center.
-
-* **steerRatio too high** - The vehicle ping pongs on straights and turns. If you're on a turn and the wheel is oversteering and then correcting, steerRatio is too high, and it's fighting with Kp and Ki (which you don't want) - although in the past it has been observed having an oscillating oversteering tune which could do tighter turns, but the turns weren't pleasant.
-
-* **steerRatio too low** - The vehicle doesn't turn enough on curves.
-
-* **Kf** - Lower this if your car oscillates and you've done everything else. It can be lowered to 0.
 
 ---
 

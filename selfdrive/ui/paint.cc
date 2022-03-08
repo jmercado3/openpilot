@@ -27,6 +27,26 @@
 
 #include "selfdrive/ui/ui.h"
 
+
+int offset_button_y(UIState *s, int center_y, int radius){
+  if ((*s->sm)["controlsState"].getControlsState().getAlertSize() == cereal::ControlsState::AlertSize::SMALL){
+    center_y = 2 * center_y / 3 + radius / 2;
+  }
+  else if ((*s->sm)["controlsState"].getControlsState().getAlertSize() == cereal::ControlsState::AlertSize::MID){
+    center_y = (center_y + radius) / 2;
+  }
+  return center_y;
+}
+
+int offset_right_side_button_x(UIState *s, int center_x, int radius){
+  if ((*s->sm)["controlsState"].getControlsState().getAlertSize() == cereal::ControlsState::AlertSize::SMALL
+  && s->scene.measure_cur_num_slots > 0){
+    int off = s->scene.measure_slots_rect.right() - center_x;
+    center_x = s->scene.measure_slots_rect.x - off - bdr_s;
+  }
+  return center_x;
+}
+
 static void ui_draw_text(const UIState *s, float x, float y, const char *string, float size, NVGcolor color, const char *font_name) {
   nvgFontFace(s->vg, font_name);
   nvgFontSize(s->vg, size);
@@ -227,27 +247,13 @@ static void ui_draw_vision_lane_lines(UIState *s) {
   const UIScene &scene = s->scene;
   NVGpaint track_bg;
   int steerOverride = scene.car_state.getSteeringPressed();
-  int red_lvl = 0;
-  int green_lvl = 0;
-
-  float red_lvl_line = 0;
-  float green_lvl_line = 0;
   //if (!scene.end_to_end) {
   if (!scene.lateralPlan.lanelessModeStatus) {
     // paint lanelines
     for (int i = 0; i < std::size(scene.lane_line_vertices); i++) {
-      if (scene.lane_line_probs[i] > 0.4){
-        red_lvl_line = 1.0 - ((scene.lane_line_probs[i] - 0.4) * 2.5);
-        green_lvl_line = 1.0;
-      } else {
-        red_lvl_line = 1.0;
-        green_lvl_line = 1.0 - ((0.4 - scene.lane_line_probs[i]) * 2.5);
-      }
-      NVGcolor color = nvgRGBAf(1.0, 1.0, 1.0, scene.lane_line_probs[i]);
-      color = nvgRGBAf(red_lvl_line, green_lvl_line, 0, 1);
+      NVGcolor color = interp_alert_color(1.f - scene.lane_line_probs[i], 255);
       ui_draw_line(s, scene.lane_line_vertices[i], &color, nullptr);
     }
-
     // paint road edges
     for (int i = 0; i < std::size(scene.road_edge_vertices); i++) {
       NVGcolor color = nvgRGBAf(1.0, 0.0, 0.0, std::clamp<float>(1.0 - scene.road_edge_stds[i], 0.0, 1.0));
@@ -259,10 +265,8 @@ static void ui_draw_vision_lane_lines(UIState *s) {
       track_bg = nvgLinearGradient(s->vg, s->fb_w, s->fb_h, s->fb_w, s->fb_h*.4,
         COLOR_BLACK_ALPHA(80), COLOR_BLACK_ALPHA(20));
     } else if (!scene.lateralPlan.lanelessModeStatus) {
-      red_lvl = 0;
-      green_lvl = 200;
       track_bg = nvgLinearGradient(s->vg, s->fb_w, s->fb_h, s->fb_w, s->fb_h*.4,
-        nvgRGBA(red_lvl, green_lvl, 0, 250), nvgRGBA(red_lvl, green_lvl, 0, 50));
+        nvgRGBA(bg_colors[STATUS_ENGAGED].red(), bg_colors[STATUS_ENGAGED].green(), bg_colors[STATUS_ENGAGED].blue(), 250), nvgRGBA(bg_colors[STATUS_ENGAGED].red(), bg_colors[STATUS_ENGAGED].green(), bg_colors[STATUS_ENGAGED].blue(), 50));
     } else { // differentiate laneless mode color (Grace blue)
         track_bg = nvgLinearGradient(s->vg, s->fb_w, s->fb_h, s->fb_w, s->fb_h * .4,
           nvgRGBA(0, 100, 255, 250), nvgRGBA(0, 100, 255, 50));
@@ -411,12 +415,14 @@ NVGcolor color_from_thermal_status(int thermalStatus){
 static void ui_draw_measures(UIState *s){
   if (s->scene.measure_cur_num_slots){
     const Rect maxspeed_rect = {bdr_s * 2, int(bdr_s * 1.5), 184, 202};
-    const int center_x = s->fb_w - face_wheel_radius - bdr_s * 2;
+    int center_x = s->fb_w - face_wheel_radius - bdr_s * 2;
     const int brake_y = s->fb_h - footer_h / 2;
     const int y_min = maxspeed_rect.bottom() + bdr_s / 2;
     const int y_max = brake_y - brake_size - bdr_s / 2;
     const int y_rng = y_max - y_min;
-    const int slot_y_rng = y_rng / s->scene.measure_max_num_slots * 2; // two columns
+    const int slot_y_rng = (s->scene.measure_cur_num_slots <= 4 ? y_rng / (s->scene.measure_cur_num_slots < 3 ? 3 : s->scene.measure_cur_num_slots) : y_rng / s->scene.measure_max_num_slots * 2); // two columns
+    const int slot_y_rng_orig = y_rng / s->scene.measure_max_num_slots * 2; // two columns
+    const float slot_aspect_ratio_ratio = float(slot_y_rng) / float(slot_y_rng_orig);
     const int y_mid = (y_max + y_min) / 2;
     const int slots_y_rng = slot_y_rng * (s->scene.measure_cur_num_slots <= 5 ? s->scene.measure_cur_num_slots : 5);
     const int slots_y_min = y_mid - (slots_y_rng / 2);
@@ -424,18 +430,28 @@ static void ui_draw_measures(UIState *s){
     NVGcolor default_name_color = nvgRGBA(255, 255, 255, 200);
     NVGcolor default_unit_color = nvgRGBA(255, 255, 255, 200);
     NVGcolor default_val_color = nvgRGBA(255, 255, 255, 200);
-    int default_val_font_size = 78;
-    int default_name_font_size = 32;
-    int default_unit_font_size = 38;
+    int default_val_font_size = 78. * slot_aspect_ratio_ratio;
+    int default_name_font_size = 32. * (slot_y_rng_orig > 1. ? 0.9 * slot_aspect_ratio_ratio : 1.);
+    int default_unit_font_size = 38. * slot_aspect_ratio_ratio;
   
     // determine bounding rectangle
-    const int slots_r = brake_size + 6 + (s->scene.measure_cur_num_slots <= 5 ? 6 : 0);
-    const int slots_w = (s->scene.measure_cur_num_slots <= 5 ? 2 : 4) * slots_r;
-    const int slots_x = (s->scene.measure_cur_num_slots <= 5 ? center_x - slots_r : center_x - 3 * slots_r);
-    const Rect slots_rect = {slots_x, slots_y_min, slots_w, slots_y_rng};
+    int slots_r, slots_w, slots_x;
+    if (s->scene.measure_cur_num_slots <= 4){
+      const int slots_r_orig = brake_size + 6 + (s->scene.measure_cur_num_slots <= 5 ? 6 : 0);
+      slots_r = float(brake_size) * slot_aspect_ratio_ratio + 12.;
+      center_x -= slots_r - slots_r_orig;
+      slots_w = 2 * slots_r;
+      slots_x = center_x - slots_r;
+    }
+    else{
+      slots_r = brake_size + 6 + (s->scene.measure_cur_num_slots <= 5 ? 6 : 0);
+      slots_w = (s->scene.measure_cur_num_slots <= 5 ? 2 : 4) * slots_r;
+      slots_x = (s->scene.measure_cur_num_slots <= 5 ? center_x - slots_r : center_x - 3 * slots_r);
+    }
+    s->scene.measure_slots_rect = {slots_x, slots_y_min, slots_w, slots_y_rng};
     // draw bounding rectangle
     nvgBeginPath(s->vg);
-    nvgRoundedRect(s->vg, slots_rect.x, slots_rect.y, slots_rect.w, slots_rect.h, 20);
+    nvgRoundedRect(s->vg, s->scene.measure_slots_rect.x, s->scene.measure_slots_rect.y, s->scene.measure_slots_rect.w, s->scene.measure_slots_rect.h, 20);
     nvgStrokeColor(s->vg, nvgRGBA(200,200,200,200));
     nvgStrokeWidth(s->vg, 6);
     nvgStroke(s->vg);
@@ -632,11 +648,32 @@ static void ui_draw_measures(UIState *s){
           snprintf(unit, sizeof(unit), "m/s²");
           break;}
         
-        case UIMeasure::JERK:
+        case UIMeasure::LAT_ACCEL:
           {
-          snprintf(name, sizeof(name), "JERK");
-          snprintf(val, sizeof(val), "%.1f", scene.jEgo);
-          snprintf(unit, sizeof(unit), "m/s³");
+          snprintf(name, sizeof(name), "LAT ACC");
+          snprintf(val, sizeof(val), "%.1f", scene.latAccel);
+          snprintf(unit, sizeof(unit), "m/s²");
+          break;}
+        
+        case UIMeasure::VISION_CURLATACCEL:
+          {
+          snprintf(name, sizeof(name), "V:LAT ACC");
+          snprintf(val, sizeof(val), "%.1f", scene.vision_cur_lat_accel);
+          snprintf(unit, sizeof(unit), "m/s²");
+          break;}
+        
+        case UIMeasure::VISION_MAXVFORCURCURV:
+          {
+          snprintf(name, sizeof(name), "V:MX CUR V");
+          snprintf(val, sizeof(val), "%.1f", scene.vision_max_v_cur_curv * 2.24);
+          snprintf(unit, sizeof(unit), "mph");
+          break;}
+        
+        case UIMeasure::VISION_MAXPREDLATACCEL:
+          {
+          snprintf(name, sizeof(name), "V:MX PLA");
+          snprintf(val, sizeof(val), "%.1f", scene.vision_max_pred_lat_accel);
+          snprintf(unit, sizeof(unit), "m/s²");
           break;}
         
         case UIMeasure::LEAD_TTC:
@@ -1031,24 +1068,121 @@ static void ui_draw_measures(UIState *s){
           {
             std::string gap;
             snprintf(name, sizeof(name), "GAP");
-            switch (int(scene.car_state.getReaddistancelines())){
-              case 1:
-              gap =  "I";
-              break;
+            if (scene.dynamic_follow_active){
+              snprintf(val, sizeof(val), "%.1f", scene.dynamic_follow_level);
+            }else
+            {
+              switch (int(scene.car_state.getReaddistancelines())){
+                case 1:
+                gap =  "I";
+                break;
               
-              case 2:
-              gap =  "I I";
-              break;
+                case 2:
+                gap =  "I I";
+                break;
               
-              case 3:
-              gap =  "I I I";
-              break;
+                case 3:
+                gap =  "I I I";
+                break;
               
-              default:
-              gap =  "";
-              break;
+                default:
+                gap =  "";
+                break;
+              }
+              snprintf(val, sizeof(val), "%s", gap.c_str());
             }
-            snprintf(val, sizeof(val), "%s", gap.c_str());
+          }
+          break;
+          
+        case UIMeasure::HVB_VOLTAGE: 
+          {
+            snprintf(name, sizeof(name), "HVB VOLT");
+            snprintf(unit, sizeof(unit), "V");
+            float temp = scene.car_state.getHvbVoltage();
+            snprintf(val, sizeof(val), "%.0f", temp);
+            g = 255;
+            b = 255;
+            p = temp - 360.;
+            p = p > 0 ? p : -p;
+            p *= 0.01666667; // red by the time voltage deviates from nominal voltage (360) by 60V deviation from nominal
+            g -= int(0.5 * p * 255.);
+            b -= int(p * 255.);
+            g = (g >= 0 ? (g <= 255 ? g : 255) : 0);
+            b = (b >= 0 ? (b <= 255 ? b : 255) : 0);
+            val_color = nvgRGBA(255, g, b, 200);
+          }
+          break;
+        
+        case UIMeasure::HVB_CURRENT: 
+          {
+            snprintf(name, sizeof(name), "HVB CUR");
+            snprintf(unit, sizeof(unit), "A");
+            float temp = -scene.car_state.getHvbCurrent();
+            if (abs(temp) >= 100.){
+              snprintf(val, sizeof(val), "%.0f", temp);
+            }
+            else{
+              snprintf(val, sizeof(val), "%.1f", temp);
+            }
+            g = 255;
+            b = 255;
+            p = scene.car_state.getHvbVoltage() - 360.;
+            p = p > 0 ? p : -p;
+            p *= 0.01666667; // red by the time voltage deviates from nominal voltage (360) by 60V deviation from nominal
+            g -= int(0.5 * p * 255.);
+            b -= int(p * 255.);
+            g = (g >= 0 ? (g <= 255 ? g : 255) : 0);
+            b = (b >= 0 ? (b <= 255 ? b : 255) : 0);
+            val_color = nvgRGBA(255, g, b, 200);
+          }
+          break;
+        
+        case UIMeasure::HVB_WATTAGE: 
+          {
+            snprintf(name, sizeof(name), "HVB POW");
+            snprintf(unit, sizeof(unit), "kW");
+            float temp = -scene.car_state.getHvbWattage();
+            if (abs(temp) >= 100.){
+              snprintf(val, sizeof(val), "%.0f", temp);
+            }
+            else{
+              snprintf(val, sizeof(val), "%.1f", temp);
+            }
+            g = 255;
+            b = 255;
+            p = scene.car_state.getHvbVoltage() - 360.;
+            p = p > 0 ? p : -p;
+            p *= 0.01666667; // red by the time voltage deviates from nominal voltage (360) by 60V deviation from nominal
+            g -= int(0.5 * p * 255.);
+            b -= int(p * 255.);
+            g = (g >= 0 ? (g <= 255 ? g : 255) : 0);
+            b = (b >= 0 ? (b <= 255 ? b : 255) : 0);
+            val_color = nvgRGBA(255, g, b, 200);
+          }
+          break;
+        
+        case UIMeasure::HVB_WATTVOLT: 
+          {
+            snprintf(name, sizeof(name), "HVB kW");
+            float temp = -scene.car_state.getHvbWattage();
+            if (abs(temp) >= 100.){
+              snprintf(val, sizeof(val), "%.0f", temp);
+            }
+            else{
+              snprintf(val, sizeof(val), "%.1f", temp);
+            }
+            temp = scene.car_state.getHvbVoltage();
+            snprintf(unit, sizeof(unit), "%.0fV", temp);
+            g = 255;
+            b = 255;
+            p = temp - 360.;
+            p = p > 0 ? p : -p;
+            p *= 0.01666667; // red by the time voltage deviates from nominal voltage (360) by 60V deviation from nominal
+            g -= int(0.5 * p * 255.);
+            b -= int(p * 255.);
+            g = (g >= 0 ? (g <= 255 ? g : 255) : 0);
+            b = (b >= 0 ? (b <= 255 ? b : 255) : 0);
+            val_color = nvgRGBA(255, g, b, 200);
           }
           break;
 
@@ -1066,12 +1200,12 @@ static void ui_draw_measures(UIState *s){
       if (vallen > 4){
         val_font_size -= (vallen - 4) * 5;
       }
-      int slot_x = slots_rect.x + (scene.measure_cur_num_slots <= 5 ? 0 : (i < 5 ? slots_r * 2 : 0));
+      int slot_x = s->scene.measure_slots_rect.x + (scene.measure_cur_num_slots <= 5 ? 0 : (i < 5 ? slots_r * 2 : 0));
       int x = slot_x + slots_r - unit_font_size / 2;
       if (i >= 5){
         x = slot_x + slots_r + unit_font_size / 2;
       }
-      int slot_y = slots_rect.y + (i % 5) * slot_y_rng;
+      int slot_y = s->scene.measure_slots_rect.y + (i % 5) * slot_y_rng;
       int slot_y_mid = slot_y + slot_y_rng / 2;
       int y = slot_y_mid + slot_y_rng / 2 - 8 - label_font_size;
       if (strlen(name) == 0){
@@ -1228,59 +1362,113 @@ static void ui_draw_vision_face(UIState *s) {
   const Rect maxspeed_rect = {bdr_s * 2, int(bdr_s * 1.5), 184, 202};
   const int radius = 96;
   const int center_x = maxspeed_rect.centerX();
-  const int center_y = s->fb_h - footer_h / 2;
+  int center_y = s->fb_h - footer_h / 2;
+  center_y = offset_button_y(s, center_y, radius);
   ui_draw_circle_image(s, center_x, center_y, radius, "driver_face", s->scene.dm_active);
 }
 
 static void ui_draw_vision_brake(UIState *s) {
   if (s->scene.brake_percent >= 0){
-    const int brake_x = s->fb_w - face_wheel_radius - bdr_s * 2;
-    const int brake_y = s->fb_h - footer_h / 2;
-    float bg_alpha = 0.1 + 0.2 * s->scene.brake_indicator_alpha;
+    // scene.brake_percent in [0,50] is engine/regen
+    // scene.brake_percent in [51,100] is friction
+    int brake_x = s->fb_w - face_wheel_radius - bdr_s * 2;
+    int brake_y = s->fb_h - footer_h / 2;
+    brake_x = offset_right_side_button_x(s, brake_x, brake_size);
+    brake_y = offset_button_y(s, brake_y, brake_size);
+    const int brake_r1 = 1;
+    const int brake_r2 = brake_size / 3 + 2;
+    const float brake_r_range = brake_r2 - brake_r1;
+    const int circ_offset = 1;
+    float bg_alpha = 0.1 + 0.3 * s->scene.brake_indicator_alpha;
     float img_alpha = 0.15 + 0.85 * s->scene.brake_indicator_alpha;
-    NVGcolor color = nvgRGBA(0, 0, 0, (255 * bg_alpha));
-    if (s->scene.brake_percent > 0 && s->scene.brake_percent <= 100){
-      int r = 0;
-      if (s->scene.brake_percent >= 50){
-        float p = 0.01 * float(s->scene.brake_percent - 50);
-        bg_alpha += 0.3 * p;
-        r = 200. * p;
-      }
-      color = nvgRGBA(r, 0, 0, (255 * bg_alpha));
-    }
-    ui_draw_circle_image(s, brake_x, brake_y, brake_size, "brake_disk", color, img_alpha);
-    if (s->scene.brake_percent > 0 && s->scene.brake_percent <= 100){
-      const int brake_r1 = 1;
-      const int brake_r2 = brake_size / 3 + 2;
-      const float brake_r_range = brake_r2 - brake_r1;
-      float p = s->scene.brake_percent;
+    if (s->scene.brake_percent > 0 && s->scene.brake_percent <= 50){
+      // engine/regen braking indicator only
+      int bp = s->scene.brake_percent * 2;
+      float p = bp;
       const int brake_r = brake_r1 + int(brake_r_range * p * 0.01);
+      bg_alpha = (0.1 + (p * 0.004));
+      if (bg_alpha > 0.3){
+        bg_alpha = 0.3;
+      }
+      ui_draw_circle_image(s, brake_x, brake_y, brake_size, "brake_disk", nvgRGBA(0, 0, 0, int(bg_alpha * 255.)), img_alpha);
       nvgBeginPath(s->vg);
-      nvgRoundedRect(s->vg, brake_x - brake_r, brake_y - brake_r, 2 * brake_r, 2 * brake_r, brake_r);
-      nvgStrokeWidth(s->vg, 6);
-      int r = 255, g = 255, b = 255, a = 200;
-      p *= 0.01;
-      g -= int(p * 255.);
-      g = (g > 0 ? g : 0);
-      b -= int((.6 + p) * 255.);
-      b = (b > 0 ? b : 0); // goes from white to orange to red at p goes from 0 to 100
-      nvgFillColor(s->vg, nvgRGBA(r,g,b,a));
-      nvgStrokeColor(s->vg, nvgRGBA(r,g,b,255));
+      nvgRoundedRect(s->vg, brake_x - brake_r + circ_offset, brake_y - brake_r + circ_offset, 2 * brake_r, 2 * brake_r, brake_r);
+      nvgStrokeWidth(s->vg, 9);
+      NVGcolor nvg_color = nvgRGBA(131,232,42, 200);
+      nvgFillColor(s->vg, nvg_color);
+      nvgStrokeColor(s->vg, nvg_color);
       nvgFill(s->vg);
       nvgStroke(s->vg);
+    }
+    else if (s->scene.brake_percent > 50){
+      int bp = (s->scene.brake_percent - 50) * 2;
+      bg_alpha = 0.3 + 0.1 * s->scene.brake_indicator_alpha;
+      NVGcolor color = nvgRGBA(0, 0, 0, (255 * bg_alpha));
+      if (bp > 0 && bp <= 100){
+        int r = 0;
+        if (bp >= 50){
+          float p = 0.01 * float(bp - 50);
+          bg_alpha += 0.3 * p;
+          r = 200. * p;
+        }
+        color = nvgRGBA(r, 0, 0, (255 * bg_alpha));
+      }
+      ui_draw_circle_image(s, brake_x, brake_y, brake_size, "brake_disk", color, img_alpha);
+      if (bp <= 100){
+        float p = bp;
+        
+        // friction braking indicator starts at outside of regen indicator and grows from there 
+        // do this by increasing radius while decreasing stroke width.
+        nvgBeginPath(s->vg);
+        const int start_r = brake_r2 + 3;
+        const int end_r = brake_size;
+        const int brake_r = start_r + float(end_r - start_r) * p * 0.01;
+        const int stroke_width = brake_r - brake_r2;
+        const int path_r = stroke_width / 2 + brake_r2;
+        nvgRoundedRect(s->vg, brake_x - path_r + circ_offset, brake_y - path_r + circ_offset, 2 * path_r, 2 * path_r, path_r);
+        nvgStrokeWidth(s->vg, stroke_width);
+        int r = 255, g = 255, b = 255, a = 200;
+        p *= 0.01;
+        g -= int(p * 255.);
+        g = (g > 0 ? g : 0);
+        b -= int((.4 + p) * 255.);
+        b = (b > 0 ? b : 0); // goes from white to orange to red as p goes from 0 to 100
+        nvgFillColor(s->vg, nvgRGBA(0,0,0,0));
+        nvgStrokeColor(s->vg, nvgRGBA(r,g,b,a));
+        nvgFill(s->vg);
+        nvgStroke(s->vg);
+        
+        // another brake image (this way the regen is on top of the background, while the brake disc itself occludes the other indicator)
+        ui_draw_circle_image(s, brake_x, brake_y, brake_size, "brake_disk", nvgRGBA(0,0,0,0), img_alpha);
+        
+        // engine/regen braking indicator
+        nvgBeginPath(s->vg);
+        nvgRoundedRect(s->vg, brake_x - brake_r2 + circ_offset, brake_y - brake_r2 + circ_offset, 2 * brake_r2, 2 * brake_r2, brake_r2);
+        nvgStrokeWidth(s->vg, 9);
+        NVGcolor nvg_color = nvgRGBA(131,232,42, 200);
+        nvgFillColor(s->vg, nvg_color);
+        nvgStrokeColor(s->vg, nvg_color);
+        nvgFill(s->vg);
+        nvgStroke(s->vg);
+      }
+    }
+    else{
+      ui_draw_circle_image(s, brake_x, brake_y, brake_size, "brake_disk", nvgRGBA(0, 0, 0, bg_alpha), img_alpha);
     }
     // s->scene.brake_touch_rect = {1,1,1,1};
   }
 }
 
 static void draw_accel_mode_button(UIState *s) {
-  if (s->vipc_client->connected) {
+  if (s->vipc_client->connected && s->scene.accel_mode_button_enabled) {
     const int radius = 72;
     int center_x = s->fb_w - face_wheel_radius - bdr_s * 2;
     if (s->scene.brake_percent >= 0){
       center_x -= brake_size + 3 * bdr_s + radius;
     }
-    const int center_y = s->fb_h - footer_h / 2 - radius / 2;
+    int center_y = s->fb_h - footer_h / 2 - radius / 2;
+    center_y = offset_button_y(s, center_y, radius);
+    center_x = offset_right_side_button_x(s, center_x, radius);
     int btn_w = radius * 2;
     int btn_h = radius * 2;
     int btn_x1 = center_x - 0.5 * radius;
@@ -1346,13 +1534,98 @@ static void draw_accel_mode_button(UIState *s) {
   }
 }
 
+static void draw_dynamic_follow_mode_button(UIState *s) {
+  if (s->vipc_client->connected && s->scene.dynamic_follow_mode_button_enabled) {
+    const int radius = 72;
+    int center_x = s->fb_w - face_wheel_radius - bdr_s * 2;
+    if (s->scene.brake_percent >= 0){
+      center_x -= brake_size + 3 * bdr_s + radius;
+    }
+    if (s->scene.accel_mode_button_enabled){
+      center_x -= 2 * (bdr_s + radius);
+    }
+    int center_y = s->fb_h - footer_h / 2 - radius / 2;
+    center_y = offset_button_y(s, center_y, radius);
+    center_x = offset_right_side_button_x(s, center_x, radius);
+    int btn_w = radius * 2;
+    int btn_h = radius * 2;
+    int btn_x1 = center_x - 0.5 * radius;
+    int btn_y = center_y - 0.5 * radius;
+    int btn_xc1 = btn_x1 + radius;
+    int btn_yc = btn_y + radius;
+    float df_level = s->scene.dynamic_follow_level_ui >= 0. ? s->scene.dynamic_follow_level_ui : 0.;
+    nvgTextAlign(s->vg, NVG_ALIGN_CENTER | NVG_ALIGN_MIDDLE);
+    nvgBeginPath(s->vg);
+    nvgRoundedRect(s->vg, btn_x1, btn_y, btn_w, btn_h, radius);
+    // nvgRoundedRect(s->vg, btn_x1, btn_y, btn_w, btn_h, 100);
+    const bool df_active = s->scene.dynamic_follow_active && !(s->scene.car_state.getOnePedalModeActive() || s->scene.car_state.getCoastOnePedalModeActive());
+    if (df_active){
+      int r, b, g;
+      int bg_r, bg_b, bg_g;
+      for (int i = 1; i < 3; ++i){
+        if (df_level <= i){
+          float c = float(i) - df_level;
+          r = float(s->scene.dynamic_follow_r[i-1]) * c + float(s->scene.dynamic_follow_r[i]) * (1. - c);
+          b = float(s->scene.dynamic_follow_b[i-1]) * c + float(s->scene.dynamic_follow_b[i]) * (1. - c);
+          g = float(s->scene.dynamic_follow_g[i-1]) * c + float(s->scene.dynamic_follow_g[i]) * (1. - c);
+          bg_r = float(s->scene.dynamic_follow_bg_r[i-1]) * c + float(s->scene.dynamic_follow_bg_r[i]) * (1. - c);
+          bg_b = float(s->scene.dynamic_follow_bg_b[i-1]) * c + float(s->scene.dynamic_follow_bg_b[i]) * (1. - c);
+          bg_g = float(s->scene.dynamic_follow_bg_g[i-1]) * c + float(s->scene.dynamic_follow_bg_g[i]) * (1. - c);
+          break;
+        }
+      }
+      nvgStrokeColor(s->vg, nvgRGBA(r,b,g,255));
+      nvgStrokeWidth(s->vg, 6);
+      nvgStroke(s->vg);
+      nvgFillColor(s->vg, nvgRGBA(bg_r,bg_b,bg_g,80));
+      nvgFill(s->vg);
+    } else{
+      nvgStrokeColor(s->vg, nvgRGBA(0,0,0,80));
+      nvgStrokeWidth(s->vg, 6);
+      nvgStroke(s->vg);
+      nvgStrokeColor(s->vg, nvgRGBA(200,200,200,80));
+      nvgStrokeWidth(s->vg, 6);
+      nvgStroke(s->vg);
+      nvgFillColor(s->vg, nvgRGBA(0,0,0,80));
+      nvgFill(s->vg);
+    }
+    
+    // draw the three follow level strings. adjust alpha and y position to create a rolling effect
+    const float dscale = 0.5;
+    for (int i = 0; i < 3; ++i){
+      char val[16];
+      snprintf(val, sizeof(val), "%s", s->scene.dynamic_follow_strs[i].c_str());
+      float alpha_f = abs(float(i) - df_level);
+      alpha_f = (alpha_f > 1. ? 1. : alpha_f) * 1.5707963268;
+      nvgFillColor(s->vg, nvgRGBA(255, 255, 255, int(cos(alpha_f) * (df_active ? 200. : 80.))));
+                                
+      nvgFontSize(s->vg, 40 + int(cos(alpha_f * 1.5707963268) * 16.));
+      
+      int text_y = btn_yc;
+      if (df_level <= i){
+        text_y -= float(radius) * sin(alpha_f) * dscale;
+      }
+      else{
+        text_y += float(radius) * sin(alpha_f) * dscale;
+      }
+      nvgText(s->vg, btn_xc1, text_y, val, NULL);
+    }
+    
+    s->scene.dynamic_follow_mode_touch_rect = Rect{center_x - laneless_btn_touch_pad, 
+                                                center_y - laneless_btn_touch_pad,
+                                                radius + 2 * laneless_btn_touch_pad, 
+                                                radius + 2 * laneless_btn_touch_pad}; 
+  }
+}
+
 static void draw_laneless_button(UIState *s) {
   if (s->vipc_client->connected) {
     const Rect maxspeed_rect = {bdr_s * 2, int(bdr_s * 1.5), 184, 202};
     const int vision_face_radius = 96;
     const int radius = 72;
     const int center_x = maxspeed_rect.centerX() + vision_face_radius + bdr_s + radius;
-    const int center_y = s->fb_h - footer_h / 2 - radius / 2;
+    int center_y = s->fb_h - footer_h / 2 - radius / 2;
+    center_y = offset_button_y(s, center_y, radius);
     int btn_w = radius * 2;
     int btn_h = radius * 2;
     int btn_x1 = center_x - 0.5 * radius;
@@ -1426,19 +1699,24 @@ static void ui_draw_vision(UIState *s) {
   }
   // Set Speed, Current Speed, Status/Events
   ui_draw_vision_header(s);
-  if ((*s->sm)["controlsState"].getControlsState().getAlertSize() == cereal::ControlsState::AlertSize::NONE) {
+  if ((*s->sm)["controlsState"].getControlsState().getAlertSize() == cereal::ControlsState::AlertSize::NONE
+  || (*s->sm)["controlsState"].getControlsState().getAlertSize() == cereal::ControlsState::AlertSize::SMALL) {
     ui_draw_vision_face(s);
     ui_draw_vision_brake(s);
     ui_draw_measures(s);
   }
-  if ((*s->sm)["controlsState"].getControlsState().getAlertSize() == cereal::ControlsState::AlertSize::SMALL) {
-    ui_draw_measures(s);
+  else if ((*s->sm)["controlsState"].getControlsState().getAlertSize() == cereal::ControlsState::AlertSize::MID) {
+    ui_draw_vision_face(s);
+    ui_draw_vision_brake(s);
   }
   if (s->scene.end_to_end) {
     draw_laneless_button(s);
   }
   if (s->scene.accel_mode_button_enabled){
     draw_accel_mode_button(s);
+  }
+  if (s->scene.dynamic_follow_mode_button_enabled){
+    draw_dynamic_follow_mode_button(s);
   }
 }
 

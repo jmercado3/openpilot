@@ -1,6 +1,6 @@
 from cereal import car
 from common.numpy_fast import clip, interp
-from selfdrive.controls.lib.pid import PIController
+from selfdrive.controls.lib.pid import PIDController
 from selfdrive.controls.lib.drive_helpers import CONTROL_N
 from selfdrive.modeld.constants import T_IDXS
 
@@ -21,16 +21,16 @@ ACCEL_MAX_ISO = 3.5 # m/s^2
 
 
 # TODO this logic isn't really car independent, does not belong here
-def long_control_state_trans(active, long_control_state, v_ego, v_target, v_pid,
+def long_control_state_trans(active, long_control_state, v_ego, v_target, v_target_future, v_pid,
                              output_accel, brake_pressed, cruise_standstill, min_speed_can):
   """Update longitudinal control state machine"""
-  stopping_target_speed = min_speed_can + STOPPING_TARGET_SPEED_OFFSET
+  accelerating = v_target_future > v_target
   stopping_condition = (v_ego < 2.0 and cruise_standstill) or \
                        (v_ego < STOPPING_EGO_SPEED and
-                        ((v_pid < stopping_target_speed and v_target < stopping_target_speed) or
+                        ((v_target_future < STOPPING_EGO_SPEED and not accelerating) or
                          brake_pressed))
 
-  starting_condition = v_target > STARTING_TARGET_SPEED and not cruise_standstill
+  starting_condition = v_target_future > STARTING_TARGET_SPEED and accelerating and not cruise_standstill
 
   if not active:
     long_control_state = LongCtrlState.off
@@ -60,8 +60,9 @@ def long_control_state_trans(active, long_control_state, v_ego, v_target, v_pid,
 class LongControl():
   def __init__(self, CP):
     self.long_control_state = LongCtrlState.off  # initialized to off
-    self.pid = PIController((CP.longitudinalTuning.kpBP, CP.longitudinalTuning.kpV),
+    self.pid = PIDController((CP.longitudinalTuning.kpBP, CP.longitudinalTuning.kpV),
                             (CP.longitudinalTuning.kiBP, CP.longitudinalTuning.kiV),
+                            (CP.longitudinalTuning.kdBP, CP.longitudinalTuning.kdV),
                             rate=RATE,
                             sat_limit=0.8)
     self.v_pid = 0.0
@@ -76,14 +77,22 @@ class LongControl():
     self.pid.reset()
     self.v_pid = v_pid
 
-  def update(self, active, CS, CP, long_plan, accel_limits):
+  def update(self, active, CS, CP, long_plan, accel_limits, t_since_plan):
     """Update longitudinal control. This updates the state machine and runs a PID loop"""
     # Interp control trajectory
-    # TODO estimate car specific lag, use .15s for now
-    if len(long_plan.speeds) == CONTROL_N:
-      v_target = interp(CP.longitudinalActuatorDelay, T_IDXS[:CONTROL_N], long_plan.speeds)
-      v_target_future = long_plan.speeds[-1]
-      a_target = 2 * (v_target - long_plan.speeds[0])/CP.longitudinalActuatorDelay - long_plan.accels[0]
+    speeds = long_plan.speeds
+    if len(speeds) == CONTROL_N:
+      v_target = interp(t_since_plan, T_IDXS[:CONTROL_N], speeds)
+      a_target = interp(t_since_plan, T_IDXS[:CONTROL_N], long_plan.accels)
+
+      v_target_lower = interp(CP.longitudinalActuatorDelayLowerBound + t_since_plan, T_IDXS[:CONTROL_N], speeds)
+      a_target_lower = 2 * (v_target_lower - v_target) / CP.longitudinalActuatorDelayLowerBound - a_target
+
+      v_target_upper = interp(CP.longitudinalActuatorDelayUpperBound + t_since_plan, T_IDXS[:CONTROL_N], speeds)
+      a_target_upper = 2 * (v_target_upper - v_target) / CP.longitudinalActuatorDelayUpperBound - a_target
+      a_target = min(a_target_lower, a_target_upper)
+
+      v_target_future = speeds[-1]
     else:
       v_target = 0.0
       v_target_future = 0.0
@@ -98,7 +107,7 @@ class LongControl():
     # Update state machine
     output_accel = self.last_output_accel
     self.long_control_state = long_control_state_trans(active, self.long_control_state, CS.vEgo,
-                                                       v_target_future, self.v_pid, output_accel,
+                                                       v_target, v_target_future, self.v_pid, output_accel,
                                                        CS.brakePressed, CS.cruiseState.standstill, CP.minSpeedCan)
 
     v_ego_pid = max(CS.vEgo, CP.minSpeedCan)  # Without this we get jumps, CAN bus reports 0 when speed < 0.3
@@ -115,11 +124,12 @@ class LongControl():
       self.coasting_lead_d = long_plan.leadDist
       self.coasting_lead_v = long_plan.leadV
       self.tr = long_plan.desiredFollowDistance
+      
 
       # Toyota starts braking more when it thinks you want to stop
       # Freeze the integrator so we don't accelerate to compensate, and don't allow positive acceleration
-      prevent_overshoot = not CP.stoppingControl and CS.vEgo < 1.5 and v_target_future < 0.7
-      deadzone = interp(v_ego_pid, CP.longitudinalTuning.deadzoneBP, CP.longitudinalTuning.deadzoneV)
+      prevent_overshoot = not CP.stoppingControl and CS.vEgo < 1.5 and v_target_future < 0.7 and v_target_future < v_target
+      deadzone = interp(CS.vEgo, CP.longitudinalTuning.deadzoneBP, CP.longitudinalTuning.deadzoneV)
       freeze_integrator = prevent_overshoot
 
       output_accel = self.pid.update(self.v_pid, v_ego_pid, speed=v_ego_pid, deadzone=deadzone, feedforward=a_target, freeze_integrator=freeze_integrator)
@@ -145,4 +155,4 @@ class LongControl():
     self.last_output_accel = output_accel
     final_accel = clip(output_accel, accel_limits[0], accel_limits[1])
 
-    return final_accel, v_target, a_target
+    return final_accel

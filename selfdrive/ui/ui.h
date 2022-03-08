@@ -133,7 +133,7 @@ typedef enum UIMeasure { //rearrange here to adjust order when cycling measures
   COOLANT_TEMPC,
   COOLANT_TEMPF,
   ACCELERATION,
-  JERK,
+  LAT_ACCEL,//JERK,
   ALTITUDE,
   PERCENT_GRADE,
   PERCENT_GRADE_DEVICE,
@@ -159,6 +159,13 @@ typedef enum UIMeasure { //rearrange here to adjust order when cycling measures
   FANSPEED_PERCENT,
   MEMORY_USAGE_PERCENT,
   FREESPACE_STORAGE,
+  HVB_VOLTAGE,
+  HVB_CURRENT,
+  HVB_WATTAGE,
+  HVB_WATTVOLT,
+  VISION_CURLATACCEL,
+  VISION_MAXVFORCURCURV,
+  VISION_MAXPREDLATACCEL,
   
   NUM_MEASURES
 } UIMeasure;
@@ -179,6 +186,15 @@ typedef struct UIScene {
   
   Rect wheel_touch_rect;
   bool wheel_rotates = true;
+  
+  float screen_dim_modes_v[3] = {0.01, 0.5, 1.};
+  int screen_dim_mode_max = 2;
+  int screen_dim_mode_cur = screen_dim_mode_max, 
+    screen_dim_mode = screen_dim_mode_max, 
+    screen_dim_mode_last = screen_dim_mode_max;
+  float screen_dim_fade = -1., screen_dim_fade_last_t = 0., screen_dim_fade_step = 1;
+  float screen_dim_fade_dur_up = 0.5, screen_dim_fade_dur_down = 2.;
+  Rect screen_dim_touch_rect;
 
   cereal::PandaState::PandaType pandaType;
   
@@ -187,6 +203,7 @@ typedef struct UIScene {
   int measure_max_num_slots = 10;
   int measure_cur_num_slots = 3;
   int measure_slots[10];
+  Rect measure_slots_rect;
   Rect measure_slot_touch_rects[10];
   int num_measures = UIMeasure::NUM_MEASURES; // the number of cases handled in ui_draw_measures() in paint.cc
   Rect speed_rect;
@@ -200,7 +217,8 @@ typedef struct UIScene {
   bool steerOverride;
   float steeringTorqueEps;
   float aEgo;
-  float jEgo, lastAEgo;
+  float latAccel = 0.;
+  float vision_cur_lat_accel, vision_max_v_cur_curv, vision_max_pred_lat_accel;
   float cpuTemp;
   int cpuPerc;
   int thermalStatus;
@@ -231,6 +249,19 @@ typedef struct UIScene {
   bool accel_mode_button_enabled;
   Rect accel_mode_touch_rect;
   int accel_mode;
+  
+  // dynamic follow mode button
+  bool dynamic_follow_mode_button_enabled;
+  Rect dynamic_follow_mode_touch_rect;
+  bool dynamic_follow_active;
+  float dynamic_follow_level, dynamic_follow_level_ui, dynamic_follow_last_t;
+  std::string dynamic_follow_strs[3] = {"Close","Med.","Far"};
+  int dynamic_follow_r[3] = {0, 157, 74};
+  int dynamic_follow_b[3] = {100, 157, 132};
+  int dynamic_follow_g[3] = {255, 157, 23};
+  int dynamic_follow_bg_r[3] = {0, 0, 74};
+  int dynamic_follow_bg_b[3] = {100, 0, 132};
+  int dynamic_follow_bg_g[3] = {255, 0, 23};
   
   // one-pedal mode fading. maxspeed rect at -1, fades away by 0, and one-pedal icon fades in by 1
   float one_pedal_fade = -1., one_pedal_fade_last_t = 0.;
@@ -368,3 +399,5 @@ public slots:
   void setAwake(bool on, bool reset);
   void update(const UIState &s);
 };
+
+NVGcolor interp_alert_color(float p, int a);

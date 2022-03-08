@@ -22,8 +22,62 @@
 #define BACKLIGHT_TS 10.00
 #define BACKLIGHT_OFFROAD 75
 
+#define MAX(A,B) A > B ? A : B
+#define MIN(A,B) A < B ? A : B
+
 static const float fade_duration = 0.3; // [s] time it takes for the brake indicator to fade in/out
 static const float fade_time_step = 1. / fade_duration; // will step in the transparent or opaque direction
+
+static const float dynamic_follow_fade_duration = 0.5;
+static const float dynamic_follow_fade_step = 1. / dynamic_follow_fade_duration;
+
+// Given interpolate between engaged/warning/critical bg color on [0-1]
+// If a < 0, interpolate that too based on bg color alpha, else pass through.
+NVGcolor interp_alert_color(float p, int a){
+  char c1, c2;
+  if (p <= 0.){
+    return (a < 0 ? nvgRGBA(bg_colors[STATUS_ENGAGED].red(), 
+                            bg_colors[STATUS_ENGAGED].green(), 
+                            bg_colors[STATUS_ENGAGED].blue(), 
+                            bg_colors[STATUS_ENGAGED].alpha()) 
+                  : nvgRGBA(bg_colors[STATUS_ENGAGED].red(), 
+                            bg_colors[STATUS_ENGAGED].green(), 
+                            bg_colors[STATUS_ENGAGED].blue(), a));
+  }
+  else if (p <= 0.5){
+    c1 = STATUS_ENGAGED; // lower color index
+    c2 = STATUS_WARNING; // higher color index
+  }
+  else if (p < 1.){
+    p -= 0.5;
+    c1 = STATUS_WARNING;
+    c2 = STATUS_ALERT;
+  }
+  else{
+    return (a < 0 ? nvgRGBA(bg_colors[STATUS_ALERT].red(), 
+                            bg_colors[STATUS_ALERT].green(), 
+                            bg_colors[STATUS_ALERT].blue(), 
+                            bg_colors[STATUS_ALERT].alpha()) 
+                  : nvgRGBA(bg_colors[STATUS_ALERT].red(), 
+                            bg_colors[STATUS_ALERT].green(), 
+                            bg_colors[STATUS_ALERT].blue(), a));
+  }
+  
+  p *= 2.; // scale to 1
+  
+  int r, g, b;
+  float complement = (1.f - p);
+  r = bg_colors[c1].red() * complement + bg_colors[c2].red() * p;
+  g = bg_colors[c1].green() * complement + bg_colors[c2].green() * p;
+  b = bg_colors[c1].blue() * complement + bg_colors[c2].blue() * p;
+  if (a < 0){
+    a = bg_colors[c1].alpha() * complement + bg_colors[c2].alpha() * p;
+  }
+  
+  NVGcolor out = nvgRGBA(r, g, b, a);
+  
+  return out;
+}
 
 // Projects a point in car to space to the corresponding point in full frame
 // image space.
@@ -143,6 +197,7 @@ static void update_state(UIState *s) {
     scene.paramsCheckLast = t;
     scene.disableDisengageOnGasEnabled = Params().getBool("DisableDisengageOnGas");
     scene.speed_limit_control_enabled = Params().getBool("SpeedLimitControl");
+    scene.screen_dim_mode = std::stoi(Params().get("ScreenDimMode"));
     if (scene.disableDisengageOnGasEnabled){
       scene.onePedalModeActive = Params().getBool("OnePedalMode");
       scene.onePedalEngageOnGasEnabled = Params().getBool("OnePedalModeEngageOnGas");
@@ -151,7 +206,57 @@ static void update_state(UIState *s) {
     if (scene.accel_mode_button_enabled){
       scene.accel_mode = std::stoi(Params().get("AccelMode"));
     }
+    if (scene.dynamic_follow_mode_button_enabled){
+      scene.dynamic_follow_active = std::stoi(Params().get("DynamicFollow"));
+    }
   }
+  
+  // fade screen brightness
+  // update screen dim
+  if (scene.started){
+    const Rect maxspeed_rect = {bdr_s * 2, int(bdr_s * 1.5), 184, 202};
+    const int radius = 96;
+    const int center_x = maxspeed_rect.centerX();
+    const int center_y = s->fb_h - footer_h / 2;
+    scene.screen_dim_touch_rect = {center_x - (1+scene.screen_dim_mode_max-scene.screen_dim_mode) * radius, center_y - (1+scene.screen_dim_mode_max-scene.screen_dim_mode) * radius, (2*(1+scene.screen_dim_mode_max-scene.screen_dim_mode)) * radius, (2*(1+scene.screen_dim_mode_max-scene.screen_dim_mode)) * radius};
+    
+    if (s->status == STATUS_WARNING){
+      scene.screen_dim_mode_cur = scene.screen_dim_mode + 1;
+      if (scene.screen_dim_mode_cur > scene.screen_dim_mode_max){
+        scene.screen_dim_mode_cur = scene.screen_dim_mode_max;
+      }
+    }
+    else if (s->status == STATUS_ALERT){
+      scene.screen_dim_mode_cur = scene.screen_dim_mode_max;
+      scene.screen_dim_fade = scene.screen_dim_modes_v[scene.screen_dim_mode_cur];
+    }
+    else{
+      scene.screen_dim_mode_cur = scene.screen_dim_mode;
+    }
+    
+    if (scene.screen_dim_mode_cur != scene.screen_dim_mode_last){
+      scene.screen_dim_fade_step = scene.screen_dim_modes_v[scene.screen_dim_mode_cur] - scene.screen_dim_modes_v[scene.screen_dim_mode_last];
+      scene.screen_dim_fade_step /= (scene.screen_dim_fade_step > 0 ? scene.screen_dim_fade_dur_up : scene.screen_dim_fade_dur_down);
+    }
+    
+    if (scene.screen_dim_fade > scene.screen_dim_modes_v[scene.screen_dim_mode_cur]){
+      scene.screen_dim_fade += scene.screen_dim_fade_step * (t - scene.screen_dim_fade_last_t);
+      if (scene.screen_dim_fade < scene.screen_dim_modes_v[scene.screen_dim_mode_cur])
+        scene.screen_dim_fade = scene.screen_dim_modes_v[scene.screen_dim_mode_cur];
+    }
+    else if (scene.screen_dim_fade < scene.screen_dim_modes_v[scene.screen_dim_mode_cur]){
+      scene.screen_dim_fade += scene.screen_dim_fade_step * (t - scene.screen_dim_fade_last_t);
+      if (scene.screen_dim_fade > scene.screen_dim_modes_v[scene.screen_dim_mode_cur])
+        scene.screen_dim_fade = scene.screen_dim_modes_v[scene.screen_dim_mode_cur];
+    }
+  }
+  else{
+    scene.screen_dim_mode_cur = scene.screen_dim_mode_max;
+    scene.screen_dim_fade = scene.screen_dim_modes_v[scene.screen_dim_mode_cur];
+    scene.screen_dim_touch_rect = {1,1,1,1};
+  }
+  scene.screen_dim_mode_last = scene.screen_dim_mode_cur;
+  scene.screen_dim_fade_last_t = t;
 
   // update engageability and DM icons at 2Hz
   if (sm.frame % (UI_FREQ / 2) == 0) {
@@ -167,48 +272,13 @@ static void update_state(UIState *s) {
     scene.car_state = sm["carState"].getCarState();
     
     scene.percentGradeDevice = tan(scene.car_state.getPitch()) * 100.;
-    
-    scene.brake_percent = scene.car_state.getFrictionBrakePercent();
-    if (scene.brake_percent > 0){
-      scene.brake_indicator_alpha += fade_time_step * (t - scene.brake_indicator_last_t);
-      if (scene.brake_indicator_alpha > 1.)
-        scene.brake_indicator_alpha = 1.;
-    }
-    else if (scene.brake_indicator_alpha > 0.){
-      scene.brake_indicator_alpha -= fade_time_step * (t - scene.brake_indicator_last_t);
-      if (scene.brake_indicator_alpha < 0.)
-        scene.brake_indicator_alpha = 0.;
-    }
-    scene.brake_indicator_last_t = t;
-    
-    if (t - scene.sessionInitTime > 10.){
-      if ((scene.car_state.getOnePedalModeActive() || scene.car_state.getCoastOnePedalModeActive())
-        || (s->status == UIStatus::STATUS_DISENGAGED && scene.controls_state.getVCruise() <= 3 && (scene.onePedalModeActive || scene.disableDisengageOnGasEnabled))){
-        scene.one_pedal_fade += fade_time_step * (t - scene.one_pedal_fade_last_t);
-        if (scene.one_pedal_fade > 1.)
-          scene.one_pedal_fade = 1.;
-      }
-      else if (scene.one_pedal_fade > -1.){
-        scene.one_pedal_fade -= fade_time_step * (t - scene.one_pedal_fade_last_t);
-        if (scene.one_pedal_fade < -1.)
-          scene.one_pedal_fade = -1.;
-      }
-    }
-    scene.one_pedal_fade_last_t = t;
   
+    scene.brake_percent = scene.car_state.getFrictionBrakePercent();
     
     scene.steerOverride= scene.car_state.getSteeringPressed();
     scene.angleSteers = scene.car_state.getSteeringAngleDeg();
     scene.engineRPM = static_cast<int>((scene.car_state.getEngineRPM() / (10.0)) + 0.5) * 10;
     scene.aEgo = scene.car_state.getAEgo();
-    float dt = t - scene.lastTime;
-    if (dt > 0.){
-      scene.jEgo = (scene.aEgo - scene.lastAEgo) / dt;
-    }
-    else{
-      scene.jEgo = 0.;
-    }
-    scene.lastAEgo = scene.aEgo;
     scene.steeringTorqueEps = scene.car_state.getSteeringTorqueEps();
     
     if (scene.car_state.getVEgo() > 0.0){
@@ -349,6 +419,7 @@ static void update_state(UIState *s) {
   }
   if (sm.updated("liveLocationKalman")) {
     scene.gpsOK = sm["liveLocationKalman"].getLiveLocationKalman().getGpsOK();
+    scene.latAccel = sm["liveLocationKalman"].getLiveLocationKalman().getAccelerationCalibrated().getValue()[1];
   }
   if (sm.updated("lateralPlan")) {
     scene.lateral_plan = sm["lateralPlan"].getLateralPlan();
@@ -367,7 +438,58 @@ static void update_state(UIState *s) {
     scene.followDistanceCost = data.getLeadDistCost();
     scene.followAccelCost = data.getLeadAccelCost();
     scene.stoppingDistance = data.getStoppingDistance();
+    scene.dynamic_follow_level = data.getDynamicFollowLevel();
+    scene.vision_cur_lat_accel = data.getVisionCurrentLateralAcceleration();
+    scene.vision_max_v_cur_curv = data.getVisionMaxVForCurrentCurvature();
+    scene.vision_max_pred_lat_accel = data.getVisionMaxPredictedLateralAcceleration();
   }
+  
+  if (scene.brake_percent > 50){
+    if (scene.brake_indicator_alpha < 1.){
+      scene.brake_indicator_alpha += fade_time_step * (t - scene.brake_indicator_last_t);
+      if (scene.brake_indicator_alpha > 1.)
+        scene.brake_indicator_alpha = 1.;
+    }
+  }
+  else if (scene.brake_indicator_alpha > 0.){
+    scene.brake_indicator_alpha -= fade_time_step * (t - scene.brake_indicator_last_t);
+    if (scene.brake_indicator_alpha < 0.)
+      scene.brake_indicator_alpha = 0.;
+  }
+  scene.brake_indicator_last_t = t;
+
+  if (t - scene.sessionInitTime > 3.){
+    if ((scene.car_state.getOnePedalModeActive() || scene.car_state.getCoastOnePedalModeActive())
+      || (s->status == UIStatus::STATUS_DISENGAGED && scene.controls_state.getVCruise() <= 3 && (scene.onePedalModeActive || scene.disableDisengageOnGasEnabled))){
+      scene.one_pedal_fade += fade_time_step * (t - scene.one_pedal_fade_last_t);
+      if (scene.one_pedal_fade > 1.)
+        scene.one_pedal_fade = 1.;
+    }
+    else if (scene.one_pedal_fade > -1.){
+      scene.one_pedal_fade -= fade_time_step * (t - scene.one_pedal_fade_last_t);
+      if (scene.one_pedal_fade < -1.)
+        scene.one_pedal_fade = -1.;
+    }
+  }
+  scene.one_pedal_fade_last_t = t;
+  
+  // dynamic follow
+  if (scene.dynamic_follow_level != scene.dynamic_follow_level_ui){
+    if (scene.dynamic_follow_level > scene.dynamic_follow_level_ui){
+      scene.dynamic_follow_level_ui += dynamic_follow_fade_step * (t - scene.dynamic_follow_last_t);
+      if (scene.dynamic_follow_level_ui > scene.dynamic_follow_level){
+        scene.dynamic_follow_level_ui = scene.dynamic_follow_level;
+      }
+    }
+    else{ // if (scene.dynamic_follow_level < scene.dynamic_follow_level_ui){
+      scene.dynamic_follow_level_ui -= dynamic_follow_fade_step * (t - scene.dynamic_follow_last_t);
+      if (scene.dynamic_follow_level_ui < scene.dynamic_follow_level){
+        scene.dynamic_follow_level_ui = scene.dynamic_follow_level;
+      }
+    }
+  }
+  scene.dynamic_follow_last_t = t;
+  
   scene.lastTime = t;
 }
 
@@ -419,10 +541,20 @@ static void update_status(UIState *s) {
       s->scene.started_frame = s->sm->frame;
 
       s->scene.end_to_end = Params().getBool("EndToEndToggle");
+      if (!s->scene.end_to_end){
+        s->scene.laneless_btn_touch_rect = {1,1,1,1};
+      }
       s->scene.laneless_mode = std::stoi(Params().get("LanelessMode"));
       s->scene.brake_percent = std::stoi(Params().get("FrictionBrakePercent"));
 
       s->scene.accel_mode_button_enabled = Params().getBool("AccelModeButton");
+      if (!s->scene.accel_mode_button_enabled){
+        s->scene.accel_mode_touch_rect = {1,1,1,1};
+      }
+      s->scene.dynamic_follow_mode_button_enabled = Params().getBool("DynamicFollowToggle");
+      if (!s->scene.dynamic_follow_mode_button_enabled){
+        s->scene.dynamic_follow_mode_touch_rect = {1,1,1,1};
+      }
 
       s->scene.sessionInitTime = seconds_since_boot();
       s->scene.percentGrade = 0;
@@ -555,6 +687,9 @@ void Device::updateBrightness(const UIState &s) {
   int brightness = brightness_filter.update(clipped_brightness);
   if (!awake) {
     brightness = 0;
+  }
+  else if (s.scene.started && QUIState::ui_state.scene.screen_dim_fade < 1.0){
+    brightness = std::clamp(int(float(brightness) * QUIState::ui_state.scene.screen_dim_fade),1,100);
   }
 
   if (brightness != last_brightness) {

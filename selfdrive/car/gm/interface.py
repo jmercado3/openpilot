@@ -61,6 +61,10 @@ class CarInterface(CarInterfaceBase):
       accel_limits[1] = max(accel_limits[1], min(INCLINE_ACCEL_MAX_STOCK_FACTOR * interp(current_speed, _A_CRUISE_MAX_BP, _A_CRUISE_MAX_V), g_accel * interp(current_speed, INCLINE_ACCEL_SCALE_BP, INCLINE_ACCEL_SCALE_V)))
     else:
       accel_limits[1] = max(DECLINE_ACCEL_MIN, accel_limits[1] + g_accel * DECLINE_ACCEL_FACTOR)
+    
+    time_since_engage = CI.CS.t - CI.CS.cruise_enabled_last_t
+    if time_since_engage < CI.CS.cruise_enabled_neg_accel_ramp_bp[-1]:
+      accel_limits[0] *= interp(time_since_engage, CI.CS.cruise_enabled_neg_accel_ramp_bp, CI.CS.cruise_enabled_neg_accel_ramp_v)
       
     return [max(CI.params.ACCEL_MIN, accel_limits[0]), min(accel_limits[1], CI.params.ACCEL_MAX)]
 
@@ -130,21 +134,25 @@ class CarInterface(CarInterfaceBase):
       ret.mass = 1607. + STD_CARGO_KG
       ret.wheelbase = 2.69
       ret.steerRatio = 17.7  # Stock 15.7, LiveParameters
-      ret.steerRateCost = 0.7
+      ret.steerRateCost = 1.0
       tire_stiffness_factor = 0.469 # Stock Michelin Energy Saver A/S, LiveParameters
       ret.steerRatioRear = 0.
       ret.centerToFront = 0.45 * ret.wheelbase # from Volt Gen 1
 
       ret.lateralTuning.pid.kpBP = [0., 40.]
-      ret.lateralTuning.pid.kpV = [0., 0.17]
-      ret.lateralTuning.pid.kiBP = [i * CV.MPH_TO_MS for i in [0., 15., 55., 80.]]
-      ret.lateralTuning.pid.kiV = [0., .02, .01, .002]
+      ret.lateralTuning.pid.kpV = [0.0, .20]
+      ret.lateralTuning.pid.kiBP = [0.0]
+      ret.lateralTuning.pid.kiV = [0.02]
+      ret.lateralTuning.pid.kdBP = [i * CV.MPH_TO_MS for i in [15., 30., 55.]]
+      ret.lateralTuning.pid.kdV = [0.1, 0.25, 0.3]
       ret.lateralTuning.pid.kf = 1. # !!! ONLY for sigmoid feedforward !!!
       ret.steerActuatorDelay = 0.2
 
       # Only tuned to reduce oscillations. TODO.
-      ret.longitudinalTuning.kpV = [1.6, 1.25]
-      ret.longitudinalTuning.kiV = [0.25]
+      ret.longitudinalTuning.kpV = [1.7, 1.3]
+      ret.longitudinalTuning.kiV = [0.34]
+      ret.longitudinalTuning.kdV = [1.2, 0.2]
+      ret.longitudinalTuning.kdBP = [5., 25.]
 
     elif candidate == CAR.MALIBU:
       # supports stop and go, but initial engage must be above 18mph (which include conservatism)
@@ -172,7 +180,7 @@ class CarInterface(CarInterfaceBase):
       ret.steerRatioRear = 0.
       ret.centerToFront = ret.wheelbase * 0.4
       ret.lateralTuning.pid.kf = 1. # get_steer_feedforward_acadia()
-      ret.longitudinalTuning.kpV = [1.9, 1.5]
+      ret.longitudinalTuning.kpV = [.19, .15]
 
     elif candidate == CAR.BUICK_REGAL:
       ret.minEnableSpeed = 18 * CV.MPH_TO_MS
@@ -435,9 +443,9 @@ class CarInterface(CarInterfaceBase):
       self.CS.autoHoldActive = False
 
     if self.CS.autoHold and not self.CS.autoHoldActive and not self.CS.regenPaddlePressed:
-      if self.CS.out.vEgo > 0.02:
+      if self.CS.out.vEgo > 0.03:
         self.CS.autoHoldActive = True
-      elif self.CS.out.vEgo < 0.01 and self.CS.out.brakePressed:
+      elif self.CS.out.vEgo < 0.02 and self.CS.out.brakePressed:
         self.CS.autoHoldActive = True
 
     return can_sends

@@ -11,6 +11,10 @@ from selfdrive.car.gm.values import DBC, CAR, AccState, CanBus, \
 from selfdrive.swaglog import cloudlog
 from selfdrive.controls.lib.drive_helpers import set_v_cruise_offset
 
+class GEAR_SHIFTER2:
+  DRIVE = 4
+  LOW = 6
+
 def get_chassis_can_parser(CP, canbus):
   # this function generates lists for signal, messages and initial values
   signals = [
@@ -28,6 +32,12 @@ class CarState(CarStateBase):
     self.shifter_values = can_define.dv["ECMPRDNL"]["PRNDL"]
     self._params = Params()
     
+    with open("/data/fp_log.txt",'a') as f:
+      f.write(f"{self.car_fingerprint}\n")
+    
+    self.t = 0.
+    self.is_ev = (self.car_fingerprint == CAR.VOLT)
+    
     self.prev_distance_button = 0
     self.prev_lka_button = 0
     self.lka_button = 0
@@ -42,6 +52,10 @@ class CarState(CarStateBase):
     self.autoHoldActivated = False
     self.regenPaddlePressed = False
     self.cruiseMain = False
+    self.cruise_enabled_last_t = 0.
+    self.cruise_enabled_last = False
+    self.cruise_enabled_neg_accel_ramp_bp = [0.25, 1.0] # ramp up negative accel when engaging behind a lead over 0.75s with a .25s delay
+    self.cruise_enabled_neg_accel_ramp_v = [0., 1.]
     self.engineRPM = 0
     self.lastAutoHoldTime = 0.0
     self.sessionInitTime = sec_since_boot()
@@ -51,6 +65,7 @@ class CarState(CarStateBase):
     self.accel_mode = int(self._params.get("AccelMode", encoding="utf8"))  # 0 = normal, 1 = sport; 2 = eco; 3 = creep
     
     self.coasting_enabled = self._params.get_bool("Coasting")
+    self.coasting_dl_enabled = self.is_ev and self._params.get_bool("CoastingDL")
     self.coasting_enabled_last = self.coasting_enabled
     self.no_friction_braking = self._params.get_bool("RegenBraking")
     self.coasting_brake_over_speed_enabled = self._params.get_bool("CoastingBrakeOverSpeed")
@@ -69,6 +84,8 @@ class CarState(CarStateBase):
     self.one_pedal_mode_enabled = self._params.get_bool("OnePedalMode") and not self.disengage_on_gas
     self.one_pedal_mode_op_braking_allowed = not self._params.get_bool("OnePedalModeSimple")
     self.one_pedal_mode_engage_on_gas_enabled = self._params.get_bool("OnePedalModeEngageOnGas") and (self.one_pedal_mode_enabled or not self.disengage_on_gas)
+    self.one_pedal_dl_engage_on_gas_enabled = self.is_ev and self._params.get_bool("OnePedalDLEngageOnGas") and (self.one_pedal_mode_enabled or not self.disengage_on_gas)
+    self.one_pedal_dl_coasting_enabled = self.is_ev and self._params.get_bool("OnePedalDLCoasting") and (self.one_pedal_mode_enabled or not self.disengage_on_gas)
     self.one_pedal_mode_engage_on_gas = False
     self.one_pedal_mode_engage_on_gas_min_speed = 1. * CV.MPH_TO_MS # gas press at or above this speed with engage on gas enabled and one-pedal mode will activate
     self.one_pedal_mode_max_set_speed = 3 * CV.MPH_TO_MS #  one pedal mode activates if cruise set at or below this speed
@@ -97,7 +114,7 @@ class CarState(CarStateBase):
     
     self.drive_mode_button = False
     self.drive_mode_button_last = False
-    self.gear_shifter_raw = None
+    self.gear_shifter_ev = None
           
     self.pitch_rolling_iter = 0
     self.pitch_rolling_period = 2. # 2-second moving average
@@ -125,7 +142,9 @@ class CarState(CarStateBase):
     self.lead_d_long_brake_lockout_bp, self.lead_d_long_brake_lockout_v = [[6, 10], [1., 0.]] # pass through all cruise braking if follow distance < 6m
     
     self.showBrakeIndicator = self._params.get_bool("BrakeIndicator")
-    self.apply_brake_percent = 0 if self.showBrakeIndicator else -1 # for brake percent on ui
+    self.hvb_wattage = 0. # [kW]
+    self.hvb_wattage_bp = [0., 53.] # [kW], based on the banned user BZZT's testimony at https://www.gm-volt.com/threads/using-regen-paddle-and-l-drive-mode-summary.222289/
+    self.apply_brake_percent = 0. if self.showBrakeIndicator else -1. # for brake percent on ui
     self.vEgo = 0.
     self.v_cruise_kph = 1
     self.min_lane_change_speed = 20. * CV.MPH_TO_MS
@@ -140,7 +159,8 @@ class CarState(CarStateBase):
     ret = car.CarState.new_message()
     
     t = sec_since_boot()
-
+    self.t = t
+    
     self.prev_cruise_buttons = self.cruise_buttons
     self.cruise_buttons = pt_cp.vl["ASCMSteeringButton"]["ACCButtons"]
     self.prev_lka_button = self.lka_button
@@ -152,7 +172,7 @@ class CarState(CarStateBase):
     self.drive_mode_button = pt_cp.vl["ASCMSteeringButton"]["DriveModeButton"]
     
     if (self.drive_mode_button != self.drive_mode_button_last):
-        cloudlog.info(f"{t} Drive mode button event: new value = {self.drive_mode_button}")
+      cloudlog.info(f"{t} Drive mode button event: new value = {self.drive_mode_button}")
 
     ret.wheelSpeeds.fl = pt_cp.vl["EBCMWheelSpdFront"]["FLWheelSpd"] * CV.KPH_TO_MS
     ret.wheelSpeeds.fr = pt_cp.vl["EBCMWheelSpdFront"]["FRWheelSpd"] * CV.KPH_TO_MS
@@ -160,6 +180,7 @@ class CarState(CarStateBase):
     ret.wheelSpeeds.rr = pt_cp.vl["EBCMWheelSpdRear"]["RRWheelSpd"] * CV.KPH_TO_MS
     ret.vEgoRaw = mean([ret.wheelSpeeds.fl, ret.wheelSpeeds.fr, ret.wheelSpeeds.rl, ret.wheelSpeeds.rr])
     ret.vEgo, ret.aEgo = self.update_speed_kf(ret.vEgoRaw)
+    
     self.vEgo = ret.vEgo
     ret.standstill = ret.vEgoRaw < 0.01
 
@@ -172,35 +193,26 @@ class CarState(CarStateBase):
         self.one_pedal_pause_steering_enabled = self._params.get_bool("OnePedalPauseBlinkerSteering")
         self.one_pedal_mode_enabled = self._params.get_bool("OnePedalMode")
         self.one_pedal_mode_engage_on_gas_enabled = self._params.get_bool("OnePedalModeEngageOnGas") and (self.one_pedal_mode_enabled or not self.disengage_on_gas)
-      
-    if self.coasting_enabled != self.coasting_enabled_last:
-      if not self.coasting_enabled and self.vEgo > self.v_cruise_kph * CV.KPH_TO_MS and not self.no_friction_braking:
-        self._params.set_bool("Coasting", True)
-        self.coasting_enabled = True
-    ret.coastingActive = self.coasting_enabled
 
     self.angle_steers = pt_cp.vl["PSCMSteeringAngle"]['SteeringWheelAngle']
-    
-    gear_shifter_raw = pt_cp.vl["ECMPRDNL"]['PRNDL']
-    if (self.gear_shifter_raw != gear_shifter_raw):
-      cloudlog.info(f"{t} Gear shifted to: {gear_shifter_raw = }, {self.shifter_values.get(gear_shifter_raw, None) = }, {self.parse_gear_shifter(self.shifter_values.get(gear_shifter_raw, None)) = }")
-    self.gear_shifter_raw = gear_shifter_raw
       
     self.gear_shifter = self.parse_gear_shifter(self.shifter_values.get(pt_cp.vl["ECMPRDNL"]['PRNDL'], None))
-    self.user_brake = pt_cp.vl["EBCMBrakePedalPosition"]['BrakePedalPosition']
-    ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(pt_cp.vl["ECMPRDNL"]["PRNDL"], None))
-    ret.brake = pt_cp.vl["EBCMBrakePedalPosition"]["BrakePedalPosition"] / 0xd0
-    # Brake pedal's potentiometer returns near-zero reading even when pedal is not pressed.
-    if ret.brake < 10/0xd0:
+    ret.gearShifter = self.gear_shifter
+    ret.brakePressed = pt_cp.vl["ECMEngineStatus"]["Brake_Pressed"] != 0
+    if ret.brakePressed:
+      self.user_brake = pt_cp.vl["EBCMBrakePedalPosition"]['BrakePedalPosition']
+      ret.brake = self.user_brake / 0xd0
+    else:
+      self.user_brake = 0.
       ret.brake = 0.
     
     if self.showBrakeIndicator:
-      if t - self.sessionInitTime < 15.:
-        self.apply_brake_percent = int(round(interp(t - self.sessionInitTime - 5., [0.,2.,4.,6.,8.,10.], ([100,0]*3))) % 100)
-    ret.frictionBrakePercent = self.apply_brake_percent
+      if t - self.sessionInitTime < 13.:
+        self.apply_brake_percent = int(round(interp(t - self.sessionInitTime, [i * 3. for i in range(4)], ([100,0]*2))))
+    ret.frictionBrakePercent = int(round(self.apply_brake_percent))
     
 
-    ret.gas = pt_cp.vl["AcceleratorPedal"]["AcceleratorPedal"] / 254.
+    ret.gas = pt_cp.vl["AcceleratorPedal2"]["AcceleratorPedal2"] / 254.
     ret.gasPressed = ret.gas > 1e-5
     self.gasPressed = ret.gasPressed
 
@@ -237,7 +249,7 @@ class CarState(CarStateBase):
     ret.rightBlinker = pt_cp.vl["BCMTurnSignals"]["TurnSignals"] == 2
 
     self.blinker = (ret.leftBlinker or ret.rightBlinker)
-    if not self.disengage_on_gas and (self.pause_long_on_gas_press or self.v_cruise_kph * CV.KPH_TO_MPH <= 10.) and self.one_pedal_pause_steering_enabled:
+    if (self.coast_one_pedal_mode_active or self.one_pedal_mode_active) and (self.pause_long_on_gas_press or self.v_cruise_kph * CV.KPH_TO_MPH <= 10.) and self.one_pedal_pause_steering_enabled:
       cur_time = sec_since_boot()
       if self.blinker and not self.prev_blinker:
         self.lang_change_ramp_down_steer_start_t = cur_time
@@ -256,18 +268,49 @@ class CarState(CarStateBase):
     
 
     self.park_brake = pt_cp.vl["EPBStatus"]["EPBClosed"]
-    ret.cruiseState.available = bool(pt_cp.vl["ECMEngineStatus"]["CruiseMainOn"])
+    ret.cruiseState.available = pt_cp.vl["ECMEngineStatus"]["CruiseMainOn"] != 0
     self.cruiseMain = ret.cruiseState.available
     ret.espDisabled = pt_cp.vl["ESPStatus"]["TractionControlOn"] != 1
     self.pcm_acc_status = pt_cp.vl["AcceleratorPedal2"]["CruiseState"]
 
-    ret.brakePressed = ret.brake > 1e-5
     # Regen braking is braking
-    if self.car_fingerprint == CAR.VOLT:
-      self.regenPaddlePressed = bool(pt_cp.vl["EBCMRegenPaddle"]['RegenPaddle'])
+    if self.is_ev:
+      self.regenPaddlePressed = pt_cp.vl["EBCMRegenPaddle"]["RegenPaddle"] != 0
       ret.brakePressed = ret.brakePressed or self.regenPaddlePressed
+      hvb_current = pt_cp.vl["BECMBatteryVoltageCurrent"]['HVBatteryCurrent']
+      hvb_voltage = pt_cp.vl["BECMBatteryVoltageCurrent"]['HVBatteryVoltage']
+      self.hvb_wattage = hvb_current * hvb_voltage * 0.001
+      ret.hvbVoltage = hvb_voltage
+      ret.hvbCurrent = hvb_current
+      ret.hvbWattage = self.hvb_wattage
+      self.gear_shifter_ev = pt_cp.vl["ECMPRDNL2"]['PRNDL2']
+    
+    if self.is_ev and self.coasting_dl_enabled:
+      if not self.coasting_enabled and self.gear_shifter_ev == GEAR_SHIFTER2.DRIVE:
+        self.coasting_enabled = True
+        self._params.put_bool("Coasting", True)
+      elif self.coasting_enabled and self.gear_shifter_ev == GEAR_SHIFTER2.LOW and (self.vEgo <= self.v_cruise_kph * CV.KPH_TO_MS or self.no_friction_braking):
+        self.coasting_enabled = False
+        self._params.put_bool("Coasting", False)
+    else:
+      if self.coasting_enabled != self.coasting_enabled_last:
+        if not self.coasting_enabled and self.vEgo > self.v_cruise_kph * CV.KPH_TO_MS and not self.no_friction_braking:
+          # prevent disable of coasting if over set speed and friction brakes not disabled.
+          self._params.put_bool("Coasting", True)
+          self.coasting_enabled = True
+    ret.coastingActive = self.coasting_enabled
+    
+    if self.is_ev and self.one_pedal_dl_engage_on_gas_enabled:
+      if not self.one_pedal_mode_engage_on_gas_enabled and self.gear_shifter_ev == GEAR_SHIFTER2.LOW:
+        self.one_pedal_mode_engage_on_gas_enabled = True
+        self._params.put_bool("OnePedalModeEngageOnGas", True)
+      elif self.one_pedal_mode_engage_on_gas_enabled and self.gear_shifter_ev == GEAR_SHIFTER2.DRIVE:
+        self.one_pedal_mode_engage_on_gas_enabled = False
+        self._params.put_bool("OnePedalModeEngageOnGas", False)
 
-    ret.cruiseState.enabled = self.pcm_acc_status != AccState.OFF
+    
+    cruise_enabled = self.pcm_acc_status != AccState.OFF
+    ret.cruiseState.enabled = cruise_enabled
     ret.cruiseState.standstill = False
     
     one_pedal_mode_active = (self.one_pedal_mode_enabled and ret.cruiseState.enabled and self.v_cruise_kph * CV.KPH_TO_MS <= self.one_pedal_mode_max_set_speed)
@@ -280,6 +323,17 @@ class CarState(CarStateBase):
       else:
         self.one_pedal_last_brake_mode = min(self.one_pedal_brake_mode, 1)
         self.follow_level = self.one_pedal_last_follow_level
+    
+    if (cruise_enabled and not self.cruise_enabled_last) \
+       or (not one_pedal_mode_active and self.one_pedal_mode_active) \
+       or (not coast_one_pedal_mode_active and self.coast_one_pedal_mode_active):
+      if self.is_ev and self.gear_shifter_ev == GEAR_SHIFTER2.LOW:
+        self.cruise_enabled_neg_accel_ramp_v[0] = 0.15
+      else:
+        self.cruise_enabled_neg_accel_ramp_v[0] = 0.
+      self.cruise_enabled_last_t = t
+      
+    self.cruise_enabled_last = cruise_enabled
         
     self.coast_one_pedal_mode_active = coast_one_pedal_mode_active
     ret.coastOnePedalModeActive = self.coast_one_pedal_mode_active
@@ -320,7 +374,7 @@ class CarState(CarStateBase):
       ("LeftSeatBelt", "BCMDoorBeltStatus", 0),
       ("RightSeatBelt", "BCMDoorBeltStatus", 0),
       ("TurnSignals", "BCMTurnSignals", 0),
-      ("AcceleratorPedal", "AcceleratorPedal", 0),
+      ("AcceleratorPedal2", "AcceleratorPedal2", 0),
       ("CruiseState", "AcceleratorPedal2", 0),
       ("ACCButtons", "ASCMSteeringButton", CruiseButtons.UNPRESS),
       ("DriveModeButton", "ASCMSteeringButton", 0),
@@ -342,6 +396,7 @@ class CarState(CarStateBase):
       ("TractionControlOn", "ESPStatus", 0),
       ("EPBClosed", "EPBStatus", 0),
       ("CruiseMainOn", "ECMEngineStatus", 0),
+      ("Brake_Pressed", "ECMEngineStatus", 0),
     ]
 
     checks = [
@@ -365,9 +420,14 @@ class CarState(CarStateBase):
     if CP.carFingerprint == CAR.VOLT:
       signals += [
         ("RegenPaddle", "EBCMRegenPaddle", 0),
+        ("PRNDL2", "ECMPRDNL2", 0),
+        ("HVBatteryVoltage", "BECMBatteryVoltageCurrent", 0),
+        ("HVBatteryCurrent", "BECMBatteryVoltageCurrent", 0),
       ]
       checks += [
         ("EBCMRegenPaddle", 50),
+        ("BECMBatteryVoltageCurrent", 10),
+        ("ECMPRDNL2", 10),
       ]
       
     signals += [

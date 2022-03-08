@@ -5,7 +5,7 @@ from common.numpy_fast import interp
 
 from common.params import Params
 import cereal.messaging as messaging
-from cereal import log
+from cereal import log, car
 from common.realtime import DT_MDL
 from common.realtime import sec_since_boot
 from selfdrive.modeld.constants import T_IDXS
@@ -22,6 +22,8 @@ from selfdrive.controls.lib.turn_speed_controller import TurnSpeedController
 from selfdrive.controls.lib.events import Events
 from selfdrive.swaglog import cloudlog
 
+GearShifter = car.CarState.GearShifter
+
 LON_MPC_STEP = 0.2  # first step is 0.2s
 AWARENESS_DECEL = -0.2     # car smoothly decel at .2m/s^2 when user is distracted
 
@@ -36,10 +38,10 @@ _A_CRUISE_MIN_BP = [i * CV.MPH_TO_MS for i in [0., 15., 30., 55., 85.]]
 # need fast accel at very low speed for stop and go
 # make sure these accelerations are smaller than mpc limits
 _A_CRUISE_MAX_V_CREEP = [.3, .3, .3, .3, .3]
-_A_CRUISE_MAX_V_ECO = [.8, .7, .6, .5, .4]
-_A_CRUISE_MAX_V = [1.2, 1.4, 1.2, 0.9, 0.7]
+_A_CRUISE_MAX_V_ECO = [.8, .65, .55, .5, .4]
+_A_CRUISE_MAX_V = [1.1, 1.25, 1.0, 0.7, 0.65]
 _A_CRUISE_MAX_V_SPORT = [2.2, 2.4, 2.2, 1.1, 0.9]
-_A_CRUISE_MAX_V_FOLLOWING = [1.6, 1.8, 1.6, 0.9, 0.7]
+_A_CRUISE_MAX_V_FOLLOWING = [1.5, 1.5, 1.2, 0.7, 0.65]
 _A_CRUISE_MAX_BP = _A_CRUISE_MIN_BP
 
 _A_CRUISE_MIN_V_MODE_LIST = [_A_CRUISE_MIN_V, _A_CRUISE_MIN_V_SPORT, _A_CRUISE_MIN_V_ECO, _A_CRUISE_MIN_V_ECO]
@@ -108,6 +110,11 @@ class Planner():
     self.coasting_lead_d = -1. # [m] lead distance. -1. if no lead
     self.coasting_lead_v = -10. # lead "absolute"" velocity
     self.tr = 1.8
+    
+    self.stopped_t_last = 0.
+    self.seconds_stopped = 0
+    self.standstill_last = False
+    self.gear_shifter_last = GearShifter.park
 
     self.sessionInitTime = sec_since_boot()
     self.debug_logging = False
@@ -130,6 +137,15 @@ class Planner():
     t = cur_time
     v_ego = sm['carState'].vEgo
     a_ego = sm['carState'].aEgo
+    
+    if sm['carState'].standstill and not self.standstill_last:
+      self.stopped_t_last = t
+    self.standstill_last = sm['carState'].standstill
+    
+    if sm['carState'].standstill:
+      self.seconds_stopped = int(t - self.stopped_t_last)
+    else:
+      self.seconds_stopped = 0
 
     v_cruise_kph = sm['controlsState'].vCruise
     v_cruise_kph = min(v_cruise_kph, V_CRUISE_MAX)
@@ -152,7 +168,13 @@ class Planner():
     self.tr = self.mpcs['lead0'].tr
     
     
-    if not enabled or sm['carState'].gasPressed:
+    if sm['carState'].gearShifter == GearShifter.drive and self.gear_shifter_last != GearShifter.drive:
+      for i in ['lead0','lead1']:
+        self.mpcs[i].df.reset()
+    self.gear_shifter_last = sm['carState'].gearShifter
+    
+    
+    if long_control_state == LongCtrlState.off or sm['carState'].gasPressed:
       self.v_desired = v_ego
       self.a_desired = a_ego
 
@@ -255,8 +277,13 @@ class Planner():
     longitudinalPlan.stoppingDistance = self.mpcs['lead0'].stopping_distance
     longitudinalPlan.longitudinalPlanSource = self.longitudinalPlanSource
     longitudinalPlan.fcw = self.fcw
+    longitudinalPlan.dynamicFollowLevel = self.mpcs['lead0'].follow_level_df
+    longitudinalPlan.secondsStopped = self.seconds_stopped
 
     longitudinalPlan.visionTurnControllerState = self.vision_turn_controller.state
+    longitudinalPlan.visionCurrentLateralAcceleration = float(self.vision_turn_controller._current_lat_acc)
+    longitudinalPlan.visionMaxVForCurrentCurvature = float(self.vision_turn_controller._max_v_for_current_curvature)
+    longitudinalPlan.visionMaxPredictedLateralAcceleration = float(self.vision_turn_controller._max_pred_lat_acc)
     longitudinalPlan.visionTurnSpeed = float(self.vision_turn_controller.v_turn)
 
     longitudinalPlan.speedLimitControlState = self.speed_limit_controller.state
