@@ -151,11 +151,11 @@ class CarInterface(CarInterfaceBase):
       ret.steerActuatorDelay = 0.4
       ret.centerToFront = ret.wheelbase * 0.4
       ret.lateralTuning.pid.kpBP = [i * CV.MPH_TO_MS for i in [0., 80.]]
-      ret.lateralTuning.pid.kpV = [0.18, 0.26]
+      ret.lateralTuning.pid.kpV = [0.18, 0.3]
       ret.lateralTuning.pid.kiBP = [0.0]
-      ret.lateralTuning.pid.kiV = [0.022]
+      ret.lateralTuning.pid.kiV = [0.025]
       ret.lateralTuning.pid.kdBP = [i * CV.MPH_TO_MS for i in [15., 40.]]
-      ret.lateralTuning.pid.kdV = [0.25, 0.32]
+      ret.lateralTuning.pid.kdV = [0.28, 0.35]
       ret.lateralTuning.pid.kf = 1. # get_steer_feedforward_acadia()
       ret.longitudinalTuning.kdV = [0.8, 0.2]
       ret.longitudinalTuning.kdBP = [5., 25.]
