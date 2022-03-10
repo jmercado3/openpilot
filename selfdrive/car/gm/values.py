@@ -4,10 +4,10 @@ Ecu = car.CarParams.Ecu
 
 class CarControllerParams():
   def __init__(self, CP):  
-    self.STEER_MAX = 300  # Safety limit, not LKA max. Trucks use 600.
+    self.STEER_MAX = 290  # Safety limit, not LKA max. Trucks use 600.
     self.STEER_STEP = 2  # control frames per command
-    self.STEER_DELTA_UP = 7
-    self.STEER_DELTA_DOWN = 17
+    self.STEER_DELTA_UP = 5
+    self.STEER_DELTA_DOWN = 13
     self.MIN_STEER_SPEED = 3.  # m/s
     self.STEER_DRIVER_ALLOWANCE = 50
     self.STEER_DRIVER_MULTIPLIER = 4
