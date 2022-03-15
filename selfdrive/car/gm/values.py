@@ -22,7 +22,7 @@ class CarControllerParams():
     self.CAMERA_KEEPALIVE_STEP = 100
 
     # pedal lookups, only for Volt
-    self.MAX_GAS_V = [3500, 4095, 3300, 3150] # max-gas values for stock/sport/eco/creep accel profiles
+    self.MAX_GAS_V = [3700, 4095, 3500, 3350] # max-gas values for stock/sport/eco/creep accel profiles
     self.ZERO_GAS = 2048
     MAX_BRAKE = 350             # Should be around 3.5m/s^2, including regen
 
