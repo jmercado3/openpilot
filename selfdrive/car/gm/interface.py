@@ -10,16 +10,7 @@ from selfdrive.car.gm.values import CAR, CruiseButtons, \
                                     AccState, CarControllerParams
 from selfdrive.car import STD_CARGO_KG, scale_rot_inertia, scale_tire_stiffness, gen_empty_fingerprint
 from selfdrive.car.interfaces import CarInterfaceBase
-from selfdrive.controls.lib.longitudinal_planner import _A_CRUISE_MIN_V_SPORT, \
-                                                        _A_CRUISE_MIN_V_FOLLOWING, \
-                                                        _A_CRUISE_MIN_V, \
-                                                        _A_CRUISE_MIN_V_ECO, \
-                                                        _A_CRUISE_MIN_BP, \
-                                                        _A_CRUISE_MAX_V_CREEP, \
-                                                        _A_CRUISE_MAX_V_ECO, \
-                                                        _A_CRUISE_MAX_V, \
-                                                        _A_CRUISE_MAX_V_SPORT, \
-                                                        _A_CRUISE_MAX_V_FOLLOWING, \
+from selfdrive.controls.lib.longitudinal_planner import _A_CRUISE_MAX_V, \
                                                         _A_CRUISE_MAX_BP, \
                                                         _A_CRUISE_MIN_V_MODE_LIST, \
                                                         _A_CRUISE_MAX_V_MODE_LIST, \
