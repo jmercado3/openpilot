@@ -1523,6 +1523,7 @@ static void draw_accel_mode_button(UIState *s) {
       nvgFillColor(s->vg, nvgRGBA(255,255,255,200));
       nvgText(s->vg,btn_xc1,btn_yc-20,"Eco",NULL);
       nvgText(s->vg,btn_xc1,btn_yc+20,"accel",NULL);
+    }
     
     
     s->scene.accel_mode_touch_rect = Rect{center_x - laneless_btn_touch_pad, 
