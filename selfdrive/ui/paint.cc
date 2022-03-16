@@ -268,9 +268,15 @@ static void ui_draw_vision_lane_lines(UIState *s) {
       track_bg = nvgLinearGradient(s->vg, s->fb_w, s->fb_h, s->fb_w, s->fb_h*.4,
         interp_alert_color(fabs(scene.lateralCorrection), 255), 
         interp_alert_color(fabs(scene.lateralCorrection), 50));
-    } else { // differentiate laneless mode color (Grace blue)
-        track_bg = nvgLinearGradient(s->vg, s->fb_w, s->fb_h, s->fb_w, s->fb_h * .4,
-          nvgRGBA(0, 100, 255, 250), nvgRGBA(0, 100, 255, 50));
+    } else 
+    { // differentiate laneless mode color (Grace blue)
+      int g, r = 255. * fabs(scene.lateralCorrection);
+      r = CLIP(r, 0, 255);
+      g = 100 + r;
+      g = CLIP(g, 0, 255);
+      track_bg = nvgLinearGradient(s->vg, s->fb_w, s->fb_h, s->fb_w, s->fb_h * .4,
+                                  nvgRGBA(r, g, 255, 250), 
+                                  nvgRGBA(r, g, 255, 50));
     }
   } else {
     // Draw white vision track
@@ -1522,16 +1528,6 @@ static void draw_accel_mode_button(UIState *s) {
       nvgFill(s->vg);
       nvgFillColor(s->vg, nvgRGBA(255,255,255,200));
       nvgText(s->vg,btn_xc1,btn_yc-20,"Eco",NULL);
-      nvgText(s->vg,btn_xc1,btn_yc+20,"accel",NULL);
-    } else if (s->scene.accel_mode == 3) { // creep
-      nvgStrokeColor(s->vg, nvgRGBA(24,82,200,255));
-      nvgStrokeWidth(s->vg, 6);
-      nvgStroke(s->vg);
-      NVGcolor fillColor = nvgRGBA(24,82,200,80);
-      nvgFillColor(s->vg, fillColor);
-      nvgFill(s->vg);
-      nvgFillColor(s->vg, nvgRGBA(255,255,255,200));
-      nvgText(s->vg,btn_xc1,btn_yc-20,"Creep",NULL);
       nvgText(s->vg,btn_xc1,btn_yc+20,"accel",NULL);
     }
     
