@@ -61,7 +61,7 @@ class opParams:
             },
             "LAT_P": {
                 "default": 0.10,
-                "clip": [0., 0.5],
+                "clip": [0., 1.0],
                 "allowed_types": [float],
                 "live": True,
             },
@@ -111,7 +111,7 @@ class opParams:
         self.params = {}
         self.params_file = "/data/op_params.json"
         self.last_read_time = time.time()
-        self.read_period = 5.0  # read period with self.get(...) (sec)
+        self.read_period = 10.0  # read period with self.get(...) (sec)
         self.force_update = False  # replaces values with default params if True, not just add add missing key/value pairs
         self.to_delete = [
             "old_key_to_delete"
