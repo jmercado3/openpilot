@@ -3,7 +3,9 @@ from common.op_params import opParams
 import time
 import ast
 import difflib
+from os.path import exists
 
+CLEAR = ''.join(['\n'] * 100)
 
 class opEdit:  # use by running `python /data/openpilot/op_edit.py`
   def __init__(self):
@@ -11,23 +13,47 @@ class opEdit:  # use by running `python /data/openpilot/op_edit.py`
     self.params = None
     self.sleep_time = 1.0
     self.live_tuning = self.op_params.get('op_edit_live_mode', False)
-
+    self.iter = 0
+    self.log_file = "/data/tune_log.csv"
     self.run_init()
 
   def run_init(self):
     self.run_loop()
+    
+  def log_setup(self):
+    self.update_params()
+    log_exists = exists(self.log_file)
+    with open(self.log_file,"a") as f:
+      if log_exists:
+        f.write('\n')
+      f.write('#,' + ','.join(list(self.params.keys())) + '\n')
+      
+  def log(self, update = True):
+    self.update_params()
+    with open(self.log_file,"a") as f:
+      f.write(f"{str(self.iter)}," + ','.join([str(i) for i in self.params.values()]) + '\n')
+  
+  def update_params(self):
+    self.params = self.op_params.get(force_update=True)
+    self.params = dict(sorted(self.params.items(), key=lambda x:x[0].lower()))
+    if self.live_tuning:  # only display live tunable params
+      self.params = {k: v for k, v in self.params.items() if self.op_params.key_info(k).live}
 
   def run_loop(self):
     while True:
+      print(CLEAR + f'(logging changes to {self.log_file})')
       if not self.live_tuning:
         print('Parameters:\n')
       else:
         print('Live Parameters:\n')
-      self.params = self.op_params.get(force_update=True)
-      self.params = dict(sorted(self.params.items(), key=lambda x:x[0].lower()))
-      if self.live_tuning:  # only display live tunable params
-        self.params = {k: v for k, v in self.params.items() if self.op_params.key_info(k).live}
-
+      
+      if self.iter == 0:
+        self.log_setup()
+        self.log(False)
+        self.iter += 1
+      else:
+        self.update_params()
+      
       values_list = [self.params[i] if len(str(self.params[i])) < 20 else '{} ... {}'.format(str(self.params[i])[:30], str(self.params[i])[-15:]) for i in self.params]
       live = ['(live!)' if self.op_params.key_info(i).live else '' for i in self.params]
 
@@ -46,10 +72,14 @@ class opEdit:  # use by running `python /data/openpilot/op_edit.py`
         continue
       elif parsed == 'add':
         self.add_parameter()
+        self.log_setup()
+        self.log(False)
       elif parsed == 'change':
         self.change_parameter(choice)
       elif parsed == 'delete':
         self.delete_parameter()
+        self.log_setup()
+        self.log(False)
       elif parsed == 'live':
         self.live_tuning = not self.live_tuning
         self.op_params.put('op_edit_live_mode', self.live_tuning)  # for next opEdit startup
@@ -94,7 +124,7 @@ class opEdit:  # use by running `python /data/openpilot/op_edit.py`
       key_info = self.op_params.key_info(chosen_key)
 
       old_value = self.params[chosen_key]
-      print('Chosen parameter: {}'.format(chosen_key))
+      print(CLEAR + 'Chosen parameter: {}'.format(chosen_key))
 
       to_print = []
       if key_info.has_description:
@@ -107,32 +137,51 @@ class opEdit:  # use by running `python /data/openpilot/op_edit.py`
       if to_print:
         print('\n{}\n'.format('\n'.join(to_print)))
 
-      print('Current value: {} (type: {})'.format(old_value, str(type(old_value)).split("'")[1]))
+      
       if key_info.has_clip:
-        print('Clipped value: {}, [{},{}]'.format(self.op_params.get(chosen_key), key_info.min, key_info.max))
+        print('Current value: {} (type: {}; clipped to [{},{}])'.format(old_value, str(type(old_value)).split("'")[1],key_info.min, key_info.max))
+      else:
+        print('Current value: {} (type: {})'.format(old_value, str(type(old_value)).split("'")[1]))
 
       while True:
         print('\nEnter your new value:')
         new_value = input('>> ').strip()
         if new_value == '':
-            self.message('Exiting this parameter...', 0.5)
-            return
+          self.message('Exiting this parameter...', 0.5)
+          return
 
         new_value = self.parse_input(new_value)
+        if key_info.has_allowed_types and type(new_value) == int and float in key_info.allowed_types:
+          new_value = float(new_value)
+          self.message('(converting input type from int to float)')
         if key_info.has_allowed_types and type(new_value) not in key_info.allowed_types:
-            self.message('The type of data you entered ({}) is not allowed with this parameter!'.format(str(type(new_value)).split("'")[1]))
-            continue
+          self.message('The type of data you entered ({}) is not allowed with this parameter!'.format(str(type(new_value)).split("'")[1]))
+          continue
 
         if key_info.live:  # stay in live tuning interface
           self.op_params.put(chosen_key, new_value)
-          print('Saved {} with value: {}! (type: {})'.format(chosen_key, new_value, str(type(new_value)).split("'")[1]))
+          put_value = self.op_params.get(chosen_key)
+          if put_value == new_value:
+            print('Saved {} with value: {}! (type: {})'.format(chosen_key, new_value, str(type(new_value)).split("'")[1]))
+          else:
+            self.op_params.put(chosen_key, put_value)
+            print('Saved {} with value: {} clipped from: {} (type: {})'.format(chosen_key, put_value, new_value, str(type(new_value)).split("'")[1]))
+          self.iter += 1
+          self.log()
         else:  # else ask to save and break
           print('\nOld value: {} (type: {})'.format(old_value, str(type(old_value)).split("'")[1]))
           print('New value: {} (type: {})'.format(new_value, str(type(new_value)).split("'")[1]))
           print('\nDo you want to save this?')
           if self.input_with_options(['Y', 'n'], 'n')[0] == 0:
             self.op_params.put(chosen_key, new_value)
-            self.message('Saved!')
+            put_value = self.op_params.get(chosen_key)
+            if put_value == new_value:
+              self.message('Saved!')
+            else:
+              self.op_params.put(chosen_key, put_value)
+              print('Saved {} with value: {} clipped from: {} (type: {})'.format(chosen_key, put_value, new_value, str(type(new_value)).split("'")[1]))
+            self.iter += 1
+            self.log()
           else:
             self.message('Not saved!')
           return
@@ -165,7 +214,7 @@ class opEdit:  # use by running `python /data/openpilot/op_edit.py`
 
   def delete_parameter(self):
     while True:
-      print('Enter the name of the parameter to delete:')
+      print(CLEAR + 'Enter the name of the parameter to delete:')
       key = self.parse_input(input('>> '))
 
       if key == '':
@@ -191,7 +240,7 @@ class opEdit:  # use by running `python /data/openpilot/op_edit.py`
 
   def add_parameter(self):
     while True:
-      print('Type the name of your new parameter:')
+      print(CLEAR + 'Type the name of your new parameter:')
       key = self.parse_input(input('>> '))
 
       if key == '':
