@@ -111,7 +111,7 @@ class opParams:
         self.params = {}
         self.params_file = "/data/op_params.json"
         self.last_read_time = time.time()
-        self.read_period = 10.0  # read period with self.get(...) (sec)
+        self.read_period = 5.0  # read period with self.get(...) (sec)
         self.force_update = False  # replaces values with default params if True, not just add add missing key/value pairs
         self.to_delete = [
             "old_key_to_delete"
@@ -264,14 +264,9 @@ class opParams:
         return None  # unknown type
 
     def _update_params(self, key, force_update):
-        if (
-            force_update or self.key_info(key).live
-        ):  # if is a live param, we want to get updates while openpilot is running
-            if datadir and (
-                time.time() - self.last_read_time >= self.read_period or force_update
-            ):  # make sure we aren't reading file too often
-                if self._read():
-                    self.last_read_time = time.time()
+        if datadir and (force_update or time.time() - self.last_read_time >= self.read_period):  # make sure we aren't reading file too often
+            if self._read():
+                self.last_read_time = time.time()
 
     def _read(self):
         try:
