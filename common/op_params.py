@@ -41,18 +41,6 @@ class opParams:
         """
 
         self.default_params = {
-            "LAT_DELAY": {
-                "default": 0.2,
-                "clip": [0., 0.5],
-                "allowed_types": [float],
-                "live": True,
-            },
-            "LAT_COST": {
-                "default": 1.0,
-                "clip": [0.1, 2.],
-                "allowed_types": [float],
-                "live": True,
-            },
             "LAT_P_OVERRIDE": {
                 "default": 0.0,
                 "clip": [0., 0.5],

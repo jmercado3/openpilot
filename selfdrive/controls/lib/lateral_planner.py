@@ -196,7 +196,7 @@ class LateralPlanner():
       self.LP.rll_prob *= self.lane_change_ll_prob
     self.d_path_w_lines_xyz = self.LP.get_d_path(v_ego, self.t_idxs, self.path_xyz)
     # Calculate final driving path and set MPC costs
-    self.steer_rate_cost = self.op_params.get("LAT_COST")
+    self.steer_rate_cost = CP.steerRateCost
     if self.use_lanelines:
       d_path_xyz = self.d_path_w_lines_xyz
       self.libmpc.set_weights(MPC_COST_LAT.PATH, MPC_COST_LAT.HEADING, self.steer_rate_cost)

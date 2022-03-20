@@ -549,8 +549,7 @@ class Controls:
                                                                              lat_plan.psis,
                                                                              lat_plan.curvatures,
                                                                              lat_plan.curvatureRates,
-                                                                             t_since_plan,
-                                                                             opParams().get("LAT_DELAY"))
+                                                                             t_since_plan)
       actuators.steer, actuators.steeringAngleDeg, lac_log = self.LaC.update(self.active, CS, self.CP, self.VM, params, 
                                                                              desired_curvature, desired_curvature_rate)
     else:
