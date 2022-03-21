@@ -10,19 +10,8 @@ from selfdrive.car.gm.values import CAR, CruiseButtons, \
                                     AccState, CarControllerParams
 from selfdrive.car import STD_CARGO_KG, scale_rot_inertia, scale_tire_stiffness, gen_empty_fingerprint
 from selfdrive.car.interfaces import CarInterfaceBase
-from selfdrive.controls.lib.longitudinal_planner import _A_CRUISE_MIN_V_SPORT, \
-                                                        _A_CRUISE_MIN_V_FOLLOWING, \
-                                                        _A_CRUISE_MIN_V, \
-                                                        _A_CRUISE_MIN_V_ECO, \
-                                                        _A_CRUISE_MIN_BP, \
-                                                        _A_CRUISE_MAX_V_CREEP, \
-                                                        _A_CRUISE_MAX_V_ECO, \
-                                                        _A_CRUISE_MAX_V, \
-                                                        _A_CRUISE_MAX_V_SPORT, \
-                                                        _A_CRUISE_MAX_V_FOLLOWING, \
+from selfdrive.controls.lib.longitudinal_planner import _A_CRUISE_MAX_V, \
                                                         _A_CRUISE_MAX_BP, \
-                                                        _A_CRUISE_MIN_V_MODE_LIST, \
-                                                        _A_CRUISE_MAX_V_MODE_LIST, \
                                                         calc_cruise_accel_limits
 
 FOLLOW_AGGRESSION = 0.15 # (Acceleration/Decel aggression) Lower is more aggressive
@@ -33,8 +22,8 @@ _A_MIN_V_STOCK_FACTOR_V = [0., 1.]
 
 # increase/decrease max accel based on vehicle pitch
 INCLINE_ACCEL_SCALE_BP = [i * CV.MPH_TO_MS for i in [25., 45]] # [mph] lookup speeds for additional offset
-INCLINE_ACCEL_SCALE_V = [1.2, 1.05] # [m/s^2] additional scale factor to change how incline affects accel based on speed
-INCLINE_ACCEL_MAX_STOCK_FACTOR = 0.8 # acceleration will never be increased to more than this factor of the "stock" acceleration at the current speed
+INCLINE_ACCEL_SCALE_V = [1.5, 1.2] # [m/s^2] additional scale factor to change how incline affects accel based on speed
+INCLINE_ACCEL_MAX_STOCK_FACTOR = 0.9 # acceleration will never be increased to more than this factor of the "stock" acceleration at the current speed
 DECLINE_ACCEL_FACTOR = 0.5 # this factor of g accel is used to lower max accel limit so you don't floor it downhill
 DECLINE_ACCEL_MIN = 0.2 # [m/s^2] don't decrease acceleration limit due to decline below this total value
 
@@ -150,8 +139,9 @@ class CarInterface(CarInterfaceBase):
 
       # Only tuned to reduce oscillations. TODO.
       ret.longitudinalTuning.kpV = [1.7, 1.3]
-      ret.longitudinalTuning.kiV = [0.34]
-      ret.longitudinalTuning.kdV = [1.2, 0.2]
+      ret.longitudinalTuning.kiBP = [5., 35.]
+      ret.longitudinalTuning.kiV = [0.31, 0.34]
+      ret.longitudinalTuning.kdV = [0.8, 0.4]
       ret.longitudinalTuning.kdBP = [5., 25.]
 
     elif candidate == CAR.MALIBU:
@@ -174,13 +164,22 @@ class CarInterface(CarInterfaceBase):
 
     elif candidate == CAR.ACADIA:
       ret.minEnableSpeed = -1.  # engage speed is decided by pcm
-      ret.mass = 4353 * CV.LB_TO_KG + STD_CARGO_KG # from vin decoder
-      ret.wheelbase = 2.86 # Confirmed from vin decoder
-      ret.steerRatio = 14.4  # end to end is 13.46 - seems to be undocumented, using JYoung value
+      ret.mass = 4353. * CV.LB_TO_KG + STD_CARGO_KG
+      ret.wheelbase = 2.86
+      ret.steerRatio = 16.0 #14.4  # end to end is 13.46
       ret.steerRatioRear = 0.
+      ret.steerActuatorDelay = 0.4
       ret.centerToFront = ret.wheelbase * 0.4
+      ret.lateralTuning.pid.kpBP = [i * CV.MPH_TO_MS for i in [0., 80.]]
+      ret.lateralTuning.pid.kpV = [0., 0.2]
+      ret.lateralTuning.pid.kiBP = [0.0]
+      ret.lateralTuning.pid.kiV = [0.025]
+      ret.lateralTuning.pid.kdV = [0.35]
       ret.lateralTuning.pid.kf = 1. # get_steer_feedforward_acadia()
-      ret.longitudinalTuning.kpV = [.19, .15]
+      ret.longitudinalTuning.kdBP = [5., 25.]
+      ret.longitudinalTuning.kdV = [0.8, 0.2]
+      ret.longitudinalTuning.kiBP = [5., 35.]
+      ret.longitudinalTuning.kiV = [0.3, 0.34]
 
     elif candidate == CAR.BUICK_REGAL:
       ret.minEnableSpeed = 18 * CV.MPH_TO_MS
@@ -234,16 +233,16 @@ class CarInterface(CarInterfaceBase):
   # returns a car.CarState
   def update(self, c, can_strings):
     self.cp.update_strings(can_strings)
+    self.cp_loopback.update_strings(can_strings)
 
-    ret = self.CS.update(self.cp)
+    ret = self.CS.update(self.cp, self.cp_loopback)
 
     t = sec_since_boot()
 
     cruiseEnabled = self.CS.pcm_acc_status != AccState.OFF
     ret.cruiseState.enabled = cruiseEnabled
 
-
-    ret.canValid = self.cp.can_valid
+    ret.canValid = self.cp.can_valid and self.cp_loopback.can_valid
     ret.steeringRateLimited = self.CC.steer_rate_limited if self.CC is not None else False
 
     ret.engineRPM = self.CS.engineRPM

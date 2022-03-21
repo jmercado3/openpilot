@@ -22,8 +22,6 @@
 #define BACKLIGHT_TS 10.00
 #define BACKLIGHT_OFFROAD 75
 
-#define MAX(A,B) A > B ? A : B
-#define MIN(A,B) A < B ? A : B
 
 static const float fade_duration = 0.3; // [s] time it takes for the brake indicator to fade in/out
 static const float fade_time_step = 1. / fade_duration; // will step in the transparent or opaque direction
@@ -201,7 +199,7 @@ static void update_state(UIState *s) {
     if (scene.disableDisengageOnGasEnabled){
       scene.onePedalModeActive = Params().getBool("OnePedalMode");
       scene.onePedalEngageOnGasEnabled = Params().getBool("OnePedalModeEngageOnGas");
-      scene.onePedalPauseSteering = Params().getBool("OnePedalPauseBlinkerSteering");
+      scene.visionBrakingEnabled = Params().getBool("TurnVisionControl");
     }
     if (scene.accel_mode_button_enabled){
       scene.accel_mode = std::stoi(Params().get("AccelMode"));
@@ -266,6 +264,7 @@ static void update_state(UIState *s) {
   if (scene.started && sm.updated("controlsState")) {
     scene.controls_state = sm["controlsState"].getControlsState();
     scene.car_state = sm["carState"].getCarState();
+    scene.lateralCorrection = scene.controls_state.getLateralControlState().getPidState().getOutput();
     scene.angleSteersDes = scene.controls_state.getLateralControlState().getPidState().getAngleError() + scene.car_state.getSteeringAngleDeg();
   }
   if (sm.updated("carState")){

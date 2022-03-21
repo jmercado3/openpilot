@@ -41,6 +41,11 @@
 #define COLOR_YELLOW_ALPHA(x) nvgRGBA(218, 202, 37, x)
 #define COLOR_GREY nvgRGBA(191, 191, 191, 1)
 
+
+#define MAX(A,B) A > B ? A : B
+#define MIN(A,B) A < B ? A : B
+#define CLIP(A,L,H) A < L ? L : (A > H ? H : A)
+
 typedef cereal::CarControl::HUDControl::AudibleAlert AudibleAlert;
 
 // TODO: this is also hardcoded in common/transformations/camera.py
@@ -211,6 +216,7 @@ typedef struct UIScene {
   // actual measures
   float angleSteers;
   float angleSteersDes;
+  float lateralCorrection;
   float gpsAccuracyUblox;
   float altitudeUblox = 0.;
   int engineRPM;
@@ -231,7 +237,7 @@ typedef struct UIScene {
   
   float lastTime = 0., sessionInitTime = 0.;
   float paramsCheckLast = 0., paramsCheckFreq = 0.1; // check params at 10Hz
-  bool onePedalModeActive, disableDisengageOnGasEnabled, onePedalEngageOnGasEnabled, onePedalPauseSteering;
+  bool onePedalModeActive, disableDisengageOnGasEnabled, onePedalEngageOnGasEnabled, visionBrakingEnabled;
 
   int lead_status;
   float lead_d_rel, lead_v_rel, lead_v;

@@ -266,10 +266,17 @@ static void ui_draw_vision_lane_lines(UIState *s) {
         COLOR_BLACK_ALPHA(80), COLOR_BLACK_ALPHA(20));
     } else if (!scene.lateralPlan.lanelessModeStatus) {
       track_bg = nvgLinearGradient(s->vg, s->fb_w, s->fb_h, s->fb_w, s->fb_h*.4,
-        nvgRGBA(bg_colors[STATUS_ENGAGED].red(), bg_colors[STATUS_ENGAGED].green(), bg_colors[STATUS_ENGAGED].blue(), 250), nvgRGBA(bg_colors[STATUS_ENGAGED].red(), bg_colors[STATUS_ENGAGED].green(), bg_colors[STATUS_ENGAGED].blue(), 50));
-    } else { // differentiate laneless mode color (Grace blue)
-        track_bg = nvgLinearGradient(s->vg, s->fb_w, s->fb_h, s->fb_w, s->fb_h * .4,
-          nvgRGBA(0, 100, 255, 250), nvgRGBA(0, 100, 255, 50));
+        interp_alert_color(fabs(scene.lateralCorrection), 255), 
+        interp_alert_color(fabs(scene.lateralCorrection), 50));
+    } else 
+    { // differentiate laneless mode color (Grace blue)
+      int g, r = 255. * fabs(scene.lateralCorrection);
+      r = CLIP(r, 0, 255);
+      g = 100 + r;
+      g = CLIP(g, 0, 255);
+      track_bg = nvgLinearGradient(s->vg, s->fb_w, s->fb_h, s->fb_w, s->fb_h * .4,
+                                  nvgRGBA(r, g, 255, 250), 
+                                  nvgRGBA(r, g, 255, 50));
     }
   } else {
     // Draw white vision track
@@ -1327,18 +1334,26 @@ static void ui_draw_vision_event(UIState *s) {
     // now rotate and draw the wheel
     nvgSave(s->vg);
     nvgTranslate(s->vg, center_x, center_y);
+    if (visionTurnControllerState > cereal::LongitudinalPlan::VisionTurnControllerState::DISABLED){
+      ui_draw_image(s, {-radius/3, -radius/3, 2 * radius / 3, 2 * radius / 3}, "eye", 1.0f);
+    }
     if (s->scene.wheel_rotates){
       nvgRotate(s->vg, rot_angle);
     }
-    ui_draw_image(s, {-radius, -radius, 2*radius, 2*radius}, "wheel", 1.0f);
+    if (visionTurnControllerState > cereal::LongitudinalPlan::VisionTurnControllerState::DISABLED){
+      ui_draw_image(s, {-radius, -radius, 2*radius, 2*radius}, "brake_disk", 1.0f);
+    }
+    else{
+      ui_draw_image(s, {-radius, -radius, 2*radius, 2*radius}, "wheel", 1.0f);
+    }
     nvgRestore(s->vg);
     
     // draw extra circle to indiate paused low-speed one-pedal blinker steering is enabled
-    if (s->scene.one_pedal_fade > 0. && s->scene.onePedalPauseSteering){
+    if (s->scene.visionBrakingEnabled){
       nvgBeginPath(s->vg);
       const int r = int(float(radius) * 1.15);
       nvgRoundedRect(s->vg, center_x - r, center_y - r, 2 * r, 2 * r, r);
-      nvgStrokeColor(s->vg, COLOR_WHITE_ALPHA(int(s->scene.one_pedal_fade * 255.)));
+      nvgStrokeColor(s->vg, COLOR_WHITE_ALPHA(255));
       nvgFillColor(s->vg, nvgRGBA(0,0,0,0));
       nvgFill(s->vg);
       nvgStrokeWidth(s->vg, 6);
@@ -1513,16 +1528,6 @@ static void draw_accel_mode_button(UIState *s) {
       nvgFill(s->vg);
       nvgFillColor(s->vg, nvgRGBA(255,255,255,200));
       nvgText(s->vg,btn_xc1,btn_yc-20,"Eco",NULL);
-      nvgText(s->vg,btn_xc1,btn_yc+20,"accel",NULL);
-    } else if (s->scene.accel_mode == 3) { // creep
-      nvgStrokeColor(s->vg, nvgRGBA(24,82,200,255));
-      nvgStrokeWidth(s->vg, 6);
-      nvgStroke(s->vg);
-      NVGcolor fillColor = nvgRGBA(24,82,200,80);
-      nvgFillColor(s->vg, fillColor);
-      nvgFill(s->vg);
-      nvgFillColor(s->vg, nvgRGBA(255,255,255,200));
-      nvgText(s->vg,btn_xc1,btn_yc-20,"Creep",NULL);
       nvgText(s->vg,btn_xc1,btn_yc+20,"accel",NULL);
     }
     
@@ -1828,6 +1833,7 @@ void ui_nvg_init(UIState *s) {
 
   // init images
   std::vector<std::pair<const char *, const char *>> images = {
+    {"eye", "../assets/img_eye_open_white.png"},
     {"wheel", "../assets/img_chffr_wheel.png"},
     {"driver_face", "../assets/img_driver_face.png"},
     {"hands_on_wheel", "../assets/img_hands_on_wheel.png"},

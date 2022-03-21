@@ -23,7 +23,7 @@ FOLLOW_PROFILES = [
     [0.5, 2.0], # follow distances corresponding to bp0 and bp1 [s]
     [0.0, 1.892, 3.7432, 5.8632, 8.0727, 10.7301, 14.343, 17.6275, 22.4049, 28.6752, 34.8858, 40.35], # lookup table of speeds for additional follow distances [m/s] (stolen from shane)
     [0.0, 0.00099, -0.0324, -0.0647, -0.0636, -0.0601, -0.0296, -0.1211, -0.2341, -0.3991, -0.432, -0.4625], # additional follow distances based on speed [s]
-    0.8, # stopping distance behind stopped lead car [m]
+    1.2, # stopping distance behind stopped lead car [m]
     # now variable distance cost. Defined in two ways; one according to abs follow distance [m] and one in relative follow distance [s]. Larger distance cost wins. First the time-based:
     [1.0, 1.5, 2.3], # seconds behind lead car
     [MPC_COST_LONG.DISTANCE * 10., MPC_COST_LONG.DISTANCE * 7., MPC_COST_LONG.DISTANCE], # mpc distance costs lookup table based on follow distance behind lead (higher value means harder accel/braking to make up distance) (recommended to use factors of MPC_COST_LONG.DISTANCE) (It's ok to only have one value, ie static distance cost )
@@ -37,7 +37,7 @@ FOLLOW_PROFILES = [
     [0.5, 1.5],
     [0.0, 1.8627, 3.7253, 5.588, 7.4507, 9.3133, 11.5598, 13.645, 22.352, 31.2928, 33.528, 35.7632, 40.2336],
     [0.0, 0.0034975, 0.008495, 0.015, 0.025, 0.03945, 0.06195, 0.0745, 0.08895, 0.1005, 0.10495, 0.11045, 0.11845],
-    0.8,
+    1.0,
     [0.8, 2.1],
     [MPC_COST_LONG.DISTANCE, MPC_COST_LONG.DISTANCE * 0.7],
     [20., 30.],
@@ -135,9 +135,14 @@ class DynamicFollow():
   #    FOR MORE TIME AFTER A CUT-IN
   #############################################
   
-  # penalize more for close cut-ins than for far
-  cutin_dist_penalty_bp = [.2, 1.5]	# [factor of current follow distance]
-  cutin_dist_penalty_v = [2.5, 0.]  # [follow profile] cutin of 40ft or less, drop to close follow, with less penalty up to 150ft, at which point you don't care
+  # penalize more for close cut-ins than for far 
+  # (greatest of the time/length based distance penalty will be used)
+  # (at low speeds, the distance penalty will dominate)
+  cutin_time_dist_penalty_bp = [.2, 1.0, 2.0, 3.0]	# [distance from cut-in in seconds]
+  cutin_time_dist_penalty_v = [2.5, 1.0, 0.5, 0.0]  # [follow profile change]
+
+  cutin_dist_penalty_bp = [i * 0.3 for i in [15, 30., 60.]]	# [distance from cut-in in ft]
+  cutin_dist_penalty_v = [2.5, 1.0, 0.0]  # [follow profile change]
   
   # penalize more for approaching cut-ins, and *offset* the distance penalty for cut-ins pulling away
   cutin_vel_penalty_bp = [i * CV.MPH_TO_MS for i in [-7.5, 0., 15.]]  # [mph] relative velocity of new lead
@@ -164,12 +169,17 @@ class DynamicFollow():
     t = sec_since_boot()
     dur = t - self.t_last
     self.t_last = t
-    lead_v_rel = v_ego - lead_v
     lead_gone = (self.has_lead_last and not has_lead) or self.lead_d_last - lead_d < 2.5
     new_lead = has_lead and (not self.has_lead_last or self.lead_d_last - lead_d > 2.5)
     if new_lead:
-      desired_follow_distance = v_ego * interp_follow_profile(v_ego, lead_v, lead_d, self.points_cur)[0]
-      penalty_dist = interp(lead_d / desired_follow_distance, self.cutin_dist_penalty_bp, self.cutin_dist_penalty_v) if desired_follow_distance > 0. else 0.
+      if v_ego > 0.:
+        time_dist = lead_d / v_ego
+        penalty_time = interp(time_dist, self.cutin_time_dist_penalty_bp, self.cutin_time_dist_penalty_v)
+      else:
+        penalty_time = 0.
+      penalty_dist = interp(lead_d, self.cutin_dist_penalty_bp, self.cutin_dist_penalty_v)
+      penalty_dist = max(penalty_dist, penalty_time)
+      lead_v_rel = v_ego - lead_v
       penalty_vel = interp(lead_v_rel, self.cutin_vel_penalty_bp, self.cutin_vel_penalty_v)
       penalty = max(0., penalty_dist + penalty_vel)
       penalty *= interp(t - self.cutin_t_last, self.cutin_last_t_factor_bp, self.cutin_last_t_factor_v)
