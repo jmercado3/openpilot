@@ -154,6 +154,7 @@ class CarState(CarStateBase):
     self.lang_change_ramp_up_steer_start_t = 0.
     self.lang_change_ramp_down_steer_start_t = 0.
     self.lang_change_ramp_steer_dur = .5 # [s]
+
     self.lka_steering_cmd_counter = 0
 
   def update(self, pt_cp, loopback_cp):

@@ -12,8 +12,6 @@ from selfdrive.car import STD_CARGO_KG, scale_rot_inertia, scale_tire_stiffness,
 from selfdrive.car.interfaces import CarInterfaceBase
 from selfdrive.controls.lib.longitudinal_planner import _A_CRUISE_MAX_V, \
                                                         _A_CRUISE_MAX_BP, \
-                                                        _A_CRUISE_MIN_V_MODE_LIST, \
-                                                        _A_CRUISE_MAX_V_MODE_LIST, \
                                                         calc_cruise_accel_limits
 
 FOLLOW_AGGRESSION = 0.15 # (Acceleration/Decel aggression) Lower is more aggressive
@@ -25,7 +23,7 @@ _A_MIN_V_STOCK_FACTOR_V = [0., 1.]
 # increase/decrease max accel based on vehicle pitch
 INCLINE_ACCEL_SCALE_BP = [i * CV.MPH_TO_MS for i in [25., 45]] # [mph] lookup speeds for additional offset
 INCLINE_ACCEL_SCALE_V = [1.5, 1.2] # [m/s^2] additional scale factor to change how incline affects accel based on speed
-INCLINE_ACCEL_MAX_STOCK_FACTOR = 1.2 # acceleration will never be increased to more than this factor of the "stock" acceleration at the current speed
+INCLINE_ACCEL_MAX_STOCK_FACTOR = 0.9 # acceleration will never be increased to more than this factor of the "stock" acceleration at the current speed
 DECLINE_ACCEL_FACTOR = 0.5 # this factor of g accel is used to lower max accel limit so you don't floor it downhill
 DECLINE_ACCEL_MIN = 0.2 # [m/s^2] don't decrease acceleration limit due to decline below this total value
 
@@ -142,8 +140,8 @@ class CarInterface(CarInterfaceBase):
       # Only tuned to reduce oscillations. TODO.
       ret.longitudinalTuning.kpV = [1.7, 1.3]
       ret.longitudinalTuning.kiBP = [5., 35.]
-      ret.longitudinalTuning.kiV = [0.32, 0.34]
-      ret.longitudinalTuning.kdV = [0.8, 0.0]
+      ret.longitudinalTuning.kiV = [0.31, 0.34]
+      ret.longitudinalTuning.kdV = [0.8, 0.4]
       ret.longitudinalTuning.kdBP = [5., 25.]
 
     elif candidate == CAR.MALIBU:
@@ -170,7 +168,7 @@ class CarInterface(CarInterfaceBase):
       ret.wheelbase = 2.86
       ret.steerRatio = 16.0 #14.4  # end to end is 13.46
       ret.steerRatioRear = 0.
-      ret.steerActuatorDelay = 0.4
+      ret.steerActuatorDelay = 0.11
       ret.centerToFront = ret.wheelbase * 0.4
       ret.lateralTuning.pid.kpBP = [i * CV.MPH_TO_MS for i in [0., 80.]]
       ret.lateralTuning.pid.kpV = [0., 0.2]
@@ -180,9 +178,9 @@ class CarInterface(CarInterfaceBase):
       ret.lateralTuning.pid.kdV = [0.1, 0.28, 0.32]
       ret.lateralTuning.pid.kf = 1. # get_steer_feedforward_acadia()
       ret.longitudinalTuning.kdBP = [5., 25.]
-      ret.longitudinalTuning.kdV = [0.8, 0.0]
+      ret.longitudinalTuning.kdV = [0.8, 0.4]
       ret.longitudinalTuning.kiBP = [5., 35.]
-      ret.longitudinalTuning.kiV = [0.3, 0.34]
+      ret.longitudinalTuning.kiV = [0.31, 0.34]
 
     elif candidate == CAR.BUICK_REGAL:
       ret.minEnableSpeed = 18 * CV.MPH_TO_MS
