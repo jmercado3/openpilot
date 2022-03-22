@@ -34,27 +34,27 @@ class CarInterface(CarInterfaceBase):
   params_check_last_t = 0.
   params_check_freq = 0.1 # check params at 10Hz
   params = CarControllerParams()
-  
+
   @staticmethod
   def get_pid_accel_limits(CP, current_speed, cruise_speed, CI = None):
     following = CI.CS.coasting_lead_d > 0. and CI.CS.coasting_lead_d < 45.0 and CI.CS.coasting_lead_v > current_speed
     accel_limits = calc_cruise_accel_limits(current_speed, following, CI.CS.accel_mode)
-    
+
     # decrease min accel as necessary based on lead conditions
     stock_min_factor = interp(current_speed - CI.CS.coasting_lead_v, _A_MIN_V_STOCK_FACTOR_BP, _A_MIN_V_STOCK_FACTOR_V) if CI.CS.coasting_lead_d > 0. else 0.
     accel_limits[0] = stock_min_factor * CI.params.ACCEL_MIN + (1. - stock_min_factor) * accel_limits[0]
-    
+
     # decrease/increase max accel based on vehicle pitch
     g_accel = 9.81 * sin(CI.CS.pitch)
     if g_accel > 0.:
       accel_limits[1] = max(accel_limits[1], min(INCLINE_ACCEL_MAX_STOCK_FACTOR * interp(current_speed, _A_CRUISE_MAX_BP, _A_CRUISE_MAX_V), g_accel * interp(current_speed, INCLINE_ACCEL_SCALE_BP, INCLINE_ACCEL_SCALE_V)))
     else:
       accel_limits[1] = max(DECLINE_ACCEL_MIN, accel_limits[1] + g_accel * DECLINE_ACCEL_FACTOR)
-    
+
     time_since_engage = CI.CS.t - CI.CS.cruise_enabled_last_t
     if time_since_engage < CI.CS.cruise_enabled_neg_accel_ramp_bp[-1]:
       accel_limits[0] *= interp(time_since_engage, CI.CS.cruise_enabled_neg_accel_ramp_bp, CI.CS.cruise_enabled_neg_accel_ramp_v)
-      
+
     return [max(CI.params.ACCEL_MIN, accel_limits[0]), min(accel_limits[1], CI.params.ACCEL_MAX)]
 
   # Volt determined by iteratively plotting and minimizing error for f(angle, speed) = steer.
@@ -201,12 +201,12 @@ class CarInterface(CarInterfaceBase):
       ret.minEnableSpeed = -1.  # engage speed is decided by pcm
       ret.mass = 2645. + STD_CARGO_KG
       ret.wheelbase = 2.95
-      ret.steerRatio = 17.3  # end to end is 13.46
+      ret.steerRatio = 30  # end to end is 13.46
       ret.steerRatioRear = 0.
       ret.centerToFront = ret.wheelbase * 0.4
       ret.lateralTuning.pid.kiBP, ret.lateralTuning.pid.kpBP = [[10., 41.0], [10., 41.0]]
-      ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.13, 0.24], [0.01, 0.02]]
-      ret.lateralTuning.pid.kf = 0.000045
+      ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.25, 0.25], [0.01, 0.02]]
+      ret.lateralTuning.pid.kf = 0.0001
       tire_stiffness_factor = 1.0
 
     elif candidate == CAR.ESCALADE_ESV:
@@ -227,7 +227,7 @@ class CarInterface(CarInterfaceBase):
     # TODO: start from empirically derived lateral slip stiffness for the civic and scale by
     # mass and CG position, so all cars will have approximately similar dyn behaviors
     ret.tireStiffnessFront, ret.tireStiffnessRear = scale_tire_stiffness(ret.mass, ret.wheelbase, ret.centerToFront, tire_stiffness_factor=tire_stiffness_factor)
-    
+
     return ret
 
   # returns a car.CarState
@@ -276,7 +276,7 @@ class CarInterface(CarInterfaceBase):
     if cruiseEnabled and self.CS.lka_button and self.CS.lka_button != self.CS.prev_lka_button:
       self.CS.lkMode = not self.CS.lkMode
       cloudlog.info("button press event: LKA button. new value: %i" % self.CS.lkMode)
-    
+
     if t - self.params_check_last_t >= self.params_check_freq:
       self.params_check_last_t = t
       self.one_pedal_mode = self.CS._params.get_bool("OnePedalMode")
