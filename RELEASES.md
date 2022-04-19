@@ -1,3 +1,25 @@
+Version tw-0.8.9-3.11 (2022-04-19)
+========================
+ ThE fAnCy-PaNtS uPdAtEd InFoGrApHiCs EdItIoN!
+ * Put Comma Prime widget back on off-road screen
+ * NEW: Adjustable lane positioning
+   * Enable toggle, then tap onscreen (<) and (>) buttons to assume left/right position, resuming center position after 15s, 
+   * or double tap to make it stick for 10 minutes
+   * Tap same button again to disable immediately
+ * NEW: Low-overhead mode for older devices
+  * Sets default brightness to medium (feel free to tap DM icon to set it to stock/medium/low)
+  * Disables loggerd and proclogd
+  * Disables onroad uploads
+  * (On C3, dropped cpu use while car turned on, in park, from 40% to 30%)
+ * NEW: UI metrics: current lane width; device battery + current (non-C3), device fanspeed (rpm)
+ * NEW: Force Volt fingerprint using toggle
+ * NEW: Toggle to ignore missing NVME SSD (for 32GB C3 units)
+ * IMPROVED: [Volt] smoother stopping behind lead
+ * IMPROVED: Startup message with fingerprint is less visually aggressive 🐯
+ * IMPROVED??? Vision braking is more aggressive
+ * FIXED: White panda and Grey panda support!
+   * "No GPS" error not shown for no-GPS pandas
+
 Version tw-0.8.9-3.10 (2022-03-21)
 ========================
  * NEW: Color path according to (essentially) steering torque (inspired by kegman)
