@@ -13,10 +13,13 @@
 
 ### Infographics
 ------
-![](https://user-images.githubusercontent.com/37757984/127420744-89ca219c-8f8e-46d3-bccf-c1cb53b81bb1.png)
-![](https://github.com/twilsonco/openpilot/blob/tw-0.8.9-dev/fork_image_onepedal.png?raw=true)
-![](https://github.com/twilsonco/openpilot/blob/tw-0.8.9-dev/fork_image_touchcontrols.png?raw=true)
-![](https://github.com/twilsonco/openpilot/blob/tw-0.8.9-dev/fork_image_misc.png?raw=true)
+![](https://github.com/twilsonco/openpilot/blob/tw-0.8.9/fork_image_touchcontrols.png?raw=true)
+![](https://github.com/twilsonco/openpilot/blob/tw-0.8.9/fork_image_onepedal.png?raw=true)
+![](https://github.com/twilsonco/openpilot/blob/tw-0.8.9/fork_image_coasting.png?raw=true)
+![](https://github.com/twilsonco/openpilot/blob/tw-0.8.9/fork_image_lane_position.png?raw=true)
+![](https://github.com/twilsonco/openpilot/blob/tw-0.8.9/fork_image_brake_indicator.png?raw=true)
+![](https://github.com/twilsonco/openpilot/blob/tw-0.8.9/fork_image_metrics.png?raw=true)
+![](https://github.com/twilsonco/openpilot/blob/tw-0.8.9/fork_image_misc.png?raw=true)
 
 ### Appreciate My Work?
 ------
@@ -55,6 +58,9 @@
 - [x] [Chevy Volt] Sigmoidal steering response (thanks qadmus)
 - [x] [GM] [✅] AutoHold (autohold brakes when stopped; ported from kegman)
 - [x] [GM] Adjustable follow "mode" using ACC distance button (ported from kegman, but smoother follow profiles)
+- [x] Adjustable lane position using onscreen buttons
+    * Tap buttons to change lane position for 15 seconds; double-tap to change for 10 minutes
+    * Tap again to go back to center position
 - [x] [GM] [✅] Dynamic follow mode
 - [x] [GM] Toggle steering with LKAS button (wheel color changes to indicate disengagement)
 - [x] [GM] One-pedal driving a.k.a. autosteering only a.k.a. toggle longitudinal control: using regen (volt) and/or light/moderate/heavy braking, control OP all the way to a stop, without a lead, and without disengaging, with just the gas pedal (see below) (application of friction brakes originally suggested by cybertronicify — 10/06/2021)
@@ -128,6 +134,7 @@
 -----
 
 - [ ] Stop-and-go for 2018 Volt
+- [ ] Grey panda support
 - [ ] Chevy Bolt support
 - [ ] Record screen button
 - [ ] Auto engage parking brake
@@ -187,6 +194,28 @@ Then, `sudo reboot`
 
 This fork will auto-update while your device has internet access, and changes are automatically applied the next time the device restarts.
 If you're device stays connected to your car all the time, you'll be presented with a message to update when your car is off.
+
+### Tuning
+------
+
+* Remember to make small adjustments to 1 value at a time and then test.
+* Use [PlotJugger](https://github.com/commaai/openpilot/tree/master/tools/plotjuggler) to make sure you are going in the right direction.
+
+#### Lateral Tuning
+------
+**Note**: All of these parameters interact with each other so finding the balance is a bit experimental.
+
+* **Kp too high** - The vehicle overshoots and undershoots center.
+* **Kp too low** - The vehicle doesn't turn enough.
+
+* **Ki too high** - The vehicle gets to center without oscillations, but it takes too long to center. If you hit a bump or give the wheel a quick nudge, it should oscillate 3 - 5 times before coming to steady-state. If the wheel oscillates forever (critically damped), then your Kp or Ki or both are too high.
+* **Ki too low** - The vehicle oscillates trying to reach the center.
+
+* **steerRatio too high** - The vehicle ping pongs on straights and turns. If you're on a turn and the wheel is oversteering and then correcting, steerRatio is too high, and it's fighting with Kp and Ki (which you don't want) - although in the past it has been observed having an oscillating oversteering tune which could do tighter turns, but the turns weren't pleasant.
+
+* **steerRatio too low** - The vehicle doesn't turn enough on curves.
+
+* **Kf** - Lower this if your car oscillates and you've done everything else. It can be lowered to 0.
 
 ---
 
